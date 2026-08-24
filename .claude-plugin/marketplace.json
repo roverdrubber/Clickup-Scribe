@@ -1,0 +1,21 @@
+{
+  "name": "clickup-bulk-marketplace",
+  "owner": {
+    "name": "John Gabriel Bagacina"
+  },
+  "metadata": {
+    "description": "clickup-bulk: bulk ClickUp task work over REST, without spending the MCP daily quota",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "clickup-bulk",
+      "source": "./",
+      "description": "Bulk ClickUp task work that does not burn the MCP server's daily quota. Declarative JSON spec, idempotent, dry-run first.",
+      "version": "0.1.0",
+      "author": {
+        "name": "John Gabriel Bagacina"
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "_comment": "Worked example from the HRIS API board. Shows all four placement modes: a new parent with nested children, attachment to an existing parent by id, per-task status override, and a status correction on an already-created task.",
+
+  "list_id": "901615936216",
+
+  "defaults": {
+    "status": "completed",
+    "assignees": [88978416]
+  },
+
+  "status_fixes": [
+    { "task_id": "86d44avm2", "status": "completed" }
+  ],
+
+  "tasks": [
+    {
+      "name": "Attendance",
+      "description": "Capture time in and time out. Biometric devices feed it, payroll reads it.",
+      "children": [
+        { "name": "Attendance Records", "description": "List, add, correct, remove a day per employee." },
+        { "name": "Attendance Devices", "description": "Register biometric devices. Rotate the device key." },
+        { "name": "Biometric Intake", "description": "Device pushes punches. Throttled and deduped." },
+        { "name": "Intake Replay", "description": "Inspect raw payloads. Replay a failed batch." },
+        { "name": "Attendance Export", "description": "Export a cutoff period's attendance for payroll." },
+        { "name": "My Attendance", "description": "Own attendance log. Punch in and out from the app." }
+      ]
+    },
+    {
+      "name": "Employee Cases",
+      "description": "Employee relations records. NTE, warnings, commendations. Confidential by default.",
+      "children": [
+        { "name": "Case Types", "description": "Catalog of case types per company." },
+        { "name": "Case Filing", "description": "Open a case. Reference number per type per year." },
+        { "name": "Case Timeline", "description": "Append-only event trail." },
+        { "name": "Case Resolution", "description": "Resolve and close on a terminal status." },
+        { "name": "Case Confidentiality", "description": "Who may read a case. Subject, raiser, handler, admin." },
+        { "name": "Case Statistics", "description": "Counts scoped to what the caller may read." },
+        { "name": "My Cases", "description": "Raise a case, respond to one, withdraw it." }
+      ]
+    },
+
+    { "name": "Payroll Export", "parent": "86d3qqd5f", "description": "Export a cutoff period's payroll." },
+    { "name": "Payslip PDF", "parent": "86d3qqd5f", "description": "Printable payslip." },
+    { "name": "Payslip Correction", "parent": "86d3qqd5f", "description": "Supersede a released payslip. Originals stay immutable." },
+    { "name": "My Payslips", "parent": "86d3qqd5f", "description": "Own payslips and PDF." },
+
+    { "name": "Role Assignment", "parent": "86d3qq34v", "description": "Bulk assign and remove users on a role. Additive." },
+    { "name": "User Deactivation", "parent": "86d3qq34v", "description": "Deactivate and reactivate accounts." }
+  ]
+}
