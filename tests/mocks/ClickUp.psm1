@@ -13,6 +13,12 @@
 
 Set-StrictMode -Version 2.0
 
+# Pull the real module in for the pure helpers - ConvertTo-Priority,
+# ConvertTo-EpochMs, New-ClickUpTaskBody - so the harness exercises the real
+# parsing rather than a second copy of it. Only the data-returning functions
+# below are faked; they shadow the real ones in this module's export set.
+if ($env:PARITY_REAL_MODULE) { Import-Module $env:PARITY_REAL_MODULE -Force }
+
 $script:Here = $PSScriptRoot
 $script:FixturePath = $env:PARITY_FIXTURE
 if (-not $script:FixturePath) { $script:FixturePath = Join-Path $script:Here 'board.json' }
@@ -26,7 +32,7 @@ function Get-State {
     if (Test-Path $script:StatePath) {
         return Get-Content $script:StatePath -Raw | ConvertFrom-Json
     }
-    return [pscustomobject]@{ created = @(); updated = @(); n = 0 }
+    return [pscustomobject]@{ created = @(); updated = @(); deleted = @(); n = 0 }
 }
 
 function Save-State { param($State) $State | ConvertTo-Json -Depth 10 | Set-Content $script:StatePath }
@@ -63,10 +69,15 @@ function Get-ClickUpTasks {
     $rows += @(@(Get-Member2 $state 'created' @()) | Where-Object { $_.list_id -eq $ListId })
 
     $overrides = @{}
-    foreach ($u in @(Get-Member2 $state 'updated' @())) { $overrides[$u.id] = $u.status }
+    foreach ($u in @(Get-Member2 $state 'updated' @())) {
+        $st = Get-Member2 $u 'status'
+        if ($st) { $overrides[$u.id] = $st }
+    }
+    $gone = @(Get-Member2 $state 'deleted' @())
 
     $out = @()
     foreach ($row in $rows) {
+        if ($gone -contains $row.id) { continue }
         $status = $row.status
         if ($overrides.ContainsKey($row.id)) { $status = $overrides[$row.id] }
         $assignees = @()
@@ -166,16 +177,25 @@ function Get-ClickUpFolderLists {
 
 function New-ClickUpTask {
     param([string]$ListId, [string]$Name, [string]$Description = '',
-          [string]$Parent = $null, [string]$Status = $null, [int[]]$Assignees = @())
+          [string]$Parent = $null, [string]$Status = $null, [int[]]$Assignees = @(),
+          $Priority = $null, $DueDate = $null, $StartDate = $null,
+          $TimeEstimate = $null, [string[]]$Tags = @())
     $script:Calls++
+    # The real body builder runs, so parsing is under test.
+    $body = New-ClickUpTaskBody -Name $Name -Description $Description `
+        -Parent $Parent -Status $Status -Assignees $Assignees `
+        -Priority $Priority -DueDate $DueDate -StartDate $StartDate `
+        -TimeEstimate $TimeEstimate -Tags $Tags
     $state = Get-State
     $n = [int]$state.n + 1
     $taskId = 'new{0:D2}' -f $n
     $status2 = $Status
     if (-not $status2) { $status2 = 'completed' }
+    $parentValue = $null
+    if ($Parent) { $parentValue = $Parent }
     $entry = [pscustomobject]@{
-        id = $taskId; list_id = $ListId; name = $Name; parent = $Parent
-        status = $status2; assignees = @(); description = $Description
+        id = $taskId; list_id = $ListId; name = $Name; parent = $parentValue
+        status = $status2; assignees = @(); description = $Description; body = $body
     }
     $state.created = @(@(Get-Member2 $state 'created' @()) + @($entry))
     $state.n = $n
@@ -188,12 +208,61 @@ function Set-ClickUpTask {
     param([string]$TaskId, [hashtable]$Fields)
     $script:Calls++
     $state = Get-State
-    $status = $null
-    if ($Fields.ContainsKey('status')) { $status = $Fields['status'] }
-    $state.updated = @(@(Get-Member2 $state 'updated' @()) +
-                       @([pscustomobject]@{ id = $TaskId; status = $status }))
+    $entry = [ordered]@{ id = $TaskId }
+    foreach ($key in @($Fields.Keys | Sort-Object)) { $entry[$key] = $Fields[$key] }
+    $state.updated = @(@(Get-Member2 $state 'updated' @()) + @([pscustomobject]$entry))
     Save-State -State $state
     return @{}
+}
+
+
+function Remove-ClickUpTask {
+    param([string]$TaskId)
+    $script:Calls++
+    $state = Get-State
+    $state.deleted = @(@(Get-Member2 $state 'deleted' @()) + @($TaskId))
+    Save-State -State $state
+    return @{}
+}
+
+
+function Get-ClickUpMembers {
+    param()
+    $fixture = Get-Fixture
+    $out = @()
+    foreach ($m in @(Get-Member2 $fixture 'members' @())) {
+        $out += ,([ordered]@{ id = $m.id; username = $m.username
+                              email = $m.email; workspace = 'Workspace' })
+    }
+    return @($out | Sort-Object { $_.username }, { $_.id })
+}
+
+
+function Resolve-ClickUpAssignees {
+    param($Values)
+    $wanted = @($Values | Where-Object { $null -ne $_ -and "$_" -ne '' })
+    if ($wanted.Count -eq 0) { return @() }
+    if (-not ($wanted | Where-Object { "$_" -notmatch '^[0-9]+$' })) {
+        return @($wanted | ForEach-Object { [int]"$_" })
+    }
+    $people = Get-ClickUpMembers
+    $resolved = @()
+    foreach ($value in $wanted) {
+        $text = "$value"
+        if ($text -match '^[0-9]+$') { $resolved += [int]$text; continue }
+        $match = @($people | Where-Object {
+            $_.email.ToLower() -eq $text.ToLower() -or
+            $_.username.ToLower() -eq $text.ToLower() })
+        if ($match.Count -eq 0) {
+            throw ("no workspace member matches '{0}'. Run the reader's ``members`` command to list them." -f $value)
+        }
+        if ($match.Count -gt 1) {
+            throw ("'{0}' matches several members ({1}). Use the id." -f $value,
+                   (($match | ForEach-Object { $_.id }) -join ', '))
+        }
+        $resolved += [int]$match[0].id
+    }
+    return $resolved
 }
 
 

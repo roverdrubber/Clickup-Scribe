@@ -40,6 +40,11 @@ class Node:
         self.description: str = spec.get("description", "")
         self.status: str = spec.get("status", defaults.get("status", "")) or ""
         self.assignees: list[int] = spec.get("assignees", defaults.get("assignees", []))
+        self.priority = spec.get("priority", defaults.get("priority"))
+        self.due_date = spec.get("due_date", defaults.get("due_date"))
+        self.start_date = spec.get("start_date", defaults.get("start_date"))
+        self.time_estimate = spec.get("time_estimate", defaults.get("time_estimate"))
+        self.tags: list[str] = spec.get("tags", defaults.get("tags", []))
         self.explicit_parent: str | None = spec.get("parent")
         self.parent = parent
         self.existing_id: str | None = None
@@ -140,7 +145,12 @@ def cmd_add(api: ClickUp, args) -> int:
         description=args.description or "",
         parent=args.parent,
         status=args.status,
-        assignees=args.assignee or None,
+        assignees=api.resolve_assignees(args.assignee),
+        priority=args.priority,
+        due_date=args.due,
+        start_date=args.start,
+        time_estimate=args.estimate,
+        tags=args.tag,
     )
     print(f"created  {created['id']}  {args.name}")
     print(f"         {created.get('url', '')}")
@@ -149,21 +159,28 @@ def cmd_add(api: ClickUp, args) -> int:
 
 def cmd_set(api: ClickUp, args) -> int:
     """Update one existing task in place."""
-    fields = {}
-    if args.status:
-        fields["status"] = args.status
-    if args.name:
-        fields["name"] = args.name
-    if args.description is not None:
-        fields["markdown_content"] = args.description
+    fields = api.task_body(
+        name=args.name,
+        description=args.description,
+        status=args.status,
+        priority=args.priority,
+        due_date=args.due,
+        start_date=args.start,
+        time_estimate=args.estimate,
+        tags=args.tag,
+    )
+    if args.assignee:
+        # Update takes add/rem rather than a flat list.
+        fields["assignees"] = {"add": api.resolve_assignees(args.assignee)}
     if not fields:
-        print("Nothing to change. Pass --status, --name, or --description.")
+        print("Nothing to change. Pass --status, --name, --description, "
+              "--priority, --due, --start, --estimate, --tag, or --assignee.")
         return 1
 
     if args.list and not check_status(api, args.list, {args.status}):
         return 1
 
-    shown = ", ".join(f"{key}={value}" for key, value in fields.items())
+    shown = ", ".join(f"{key}={value}" for key, value in sorted(fields.items()))
     print(f"  ~ {args.task_id} -> {shown}")
     if args.dry_run:
         print("\nDry run. Drop --dry-run to write.")
@@ -171,6 +188,26 @@ def cmd_set(api: ClickUp, args) -> int:
 
     api.update_task(args.task_id, **fields)
     print(f"updated  {args.task_id}")
+    return 0
+
+
+def cmd_delete(api: ClickUp, args) -> int:
+    """Remove a task. Refuses without --yes: nothing else here destroys data."""
+    task = api.get_task(args.task_id, subtasks=True)
+    kids = task.get("subtasks") or []
+    print(f"  - {task['id']}  {task['name']}")
+    if kids:
+        print(f"    and its {len(kids)} subtask(s):")
+        for kid in kids:
+            print(f"      {kid['id']:<12} {kid['name']}")
+
+    if not args.yes:
+        print("\nRefusing to delete without --yes.")
+        return 1
+
+    api.delete_task(args.task_id)
+    print(f"deleted  {args.task_id}")
+    print("ClickUp keeps it in the workspace trash for 30 days.")
     return 0
 
 
@@ -222,7 +259,12 @@ def cmd_apply(api: ClickUp, args) -> int:
             description=node.description,
             parent=node.parent_id(),
             status=node.status or None,
-            assignees=node.assignees or None,
+            assignees=api.resolve_assignees(node.assignees),
+            priority=node.priority,
+            due_date=node.due_date,
+            start_date=node.start_date,
+            time_estimate=node.time_estimate,
+            tags=node.tags,
         )
         node.created_id = created["id"]
         print(f"created  {created['id']}  {node.name}")
@@ -259,8 +301,13 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--description", default="")
     add.add_argument("--parent", help="existing task id, to create a subtask")
     add.add_argument("--status")
-    add.add_argument("--assignee", type=int, action="append",
-                     help="numeric user id; repeat for several")
+    add.add_argument("--assignee", action="append",
+                     help="user id, email, or username; repeat for several")
+    add.add_argument("--priority", help="urgent, high, normal, or low")
+    add.add_argument("--due", metavar="YYYY-MM-DD[ HH:MM]")
+    add.add_argument("--start", metavar="YYYY-MM-DD[ HH:MM]")
+    add.add_argument("--estimate", type=int, metavar="MINUTES")
+    add.add_argument("--tag", action="append", help="repeat for several")
     add.add_argument("--allow-duplicate", action="store_true",
                      help="skip the name check and create unconditionally")
     add.add_argument("--dry-run", action="store_true")
@@ -271,6 +318,13 @@ def build_parser() -> argparse.ArgumentParser:
     setc.add_argument("--status")
     setc.add_argument("--name")
     setc.add_argument("--description")
+    setc.add_argument("--priority", help="urgent, high, normal, or low")
+    setc.add_argument("--due", metavar="YYYY-MM-DD[ HH:MM]")
+    setc.add_argument("--start", metavar="YYYY-MM-DD[ HH:MM]")
+    setc.add_argument("--estimate", type=int, metavar="MINUTES")
+    setc.add_argument("--tag", action="append", help="repeat for several")
+    setc.add_argument("--assignee", action="append",
+                      help="add an assignee: id, email, or username")
     setc.add_argument("--list", metavar="LIST_ID",
                       help="validate --status against this list first")
     setc.add_argument("--dry-run", action="store_true")
@@ -281,6 +335,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--apply", action="store_true",
                        help="write; without it this is a dry run")
     apply.set_defaults(func=cmd_apply)
+
+    delete = sub.add_parser("delete", help="remove one task")
+    delete.add_argument("task_id")
+    delete.add_argument("--yes", action="store_true",
+                        help="required; without it this only shows what would go")
+    delete.set_defaults(func=cmd_delete)
 
     show = sub.add_parser("show", help="print what is on a list")
     show.add_argument("--list", required=True, metavar="LIST_ID")

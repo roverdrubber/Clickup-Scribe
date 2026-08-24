@@ -6,6 +6,7 @@
     reader.py tasks --list 901615936216        # tasks, subtasks nested
     reader.py get 86d3qqa1e                    # one task in full
     reader.py find "payroll" --space 90161372882
+    reader.py members                          # ids for assigning tasks
     reader.py export --list 901615936216 --as-spec > spec.json
 
 Add --json to any command for machine-readable output.
@@ -278,6 +279,18 @@ def cmd_find(api: ClickUp, args) -> int:
     return 0
 
 
+def cmd_members(api: ClickUp, args) -> int:
+    """Numeric ids for `scribe --assignee` and a spec's `assignees`."""
+    people = api.members()
+    if args.json:
+        print(json.dumps(people, indent=2))
+        return 0
+    for person in people:
+        print(f"{person['id']:<12} {person['username']:<28} {person['email']}")
+    print(f"\n{len(people)} member(s), {api.calls} API calls.")
+    return 0
+
+
 def cmd_export(api: ClickUp, args) -> int:
     tasks = api.list_tasks(args.list)
     roots = nest(tasks)
@@ -323,6 +336,9 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("--space", help="search one space")
     find.add_argument("--team", help="workspace id")
     find.set_defaults(func=cmd_find)
+
+    members = common(sub.add_parser("members", help="workspace members and ids"))
+    members.set_defaults(func=cmd_members)
 
     export = common(sub.add_parser("export", help="dump a list as JSON"))
     export.add_argument("--list", required=True, metavar="LIST_ID")

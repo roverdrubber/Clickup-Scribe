@@ -30,7 +30,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('add', 'set', 'apply', 'show', 'statuses')]
+    [ValidateSet('add', 'set', 'apply', 'delete', 'show', 'statuses')]
     [string]$Command,
 
     # Task id for `set`, spec path for `apply`.
@@ -42,10 +42,16 @@ param(
     [string]$Description,
     [string]$Parent,
     [string]$Status,
-    [int[]]$Assignee,
+    [string[]]$Assignee,
+    [string]$Priority,
+    [string]$Due,
+    [string]$Start,
+    [int]$Estimate,
+    [string[]]$Tag,
     [switch]$AllowDuplicate,
     [switch]$DryRun,
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$Yes
 )
 
 Set-StrictMode -Version 2.0
@@ -83,6 +89,11 @@ function New-SpecNode {
         Description    = [string](Get-Prop $Spec 'description' '')
         Status         = [string](Get-Prop $Spec 'status' (Get-Prop $Defaults 'status' ''))
         Assignees      = @(Get-Prop $Spec 'assignees' (Get-Prop $Defaults 'assignees' @()))
+        Priority       = (Get-Prop $Spec 'priority' (Get-Prop $Defaults 'priority'))
+        DueDate        = (Get-Prop $Spec 'due_date' (Get-Prop $Defaults 'due_date'))
+        StartDate      = (Get-Prop $Spec 'start_date' (Get-Prop $Defaults 'start_date'))
+        TimeEstimate   = (Get-Prop $Spec 'time_estimate' (Get-Prop $Defaults 'time_estimate'))
+        Tags           = @(Get-Prop $Spec 'tags' (Get-Prop $Defaults 'tags' @()))
         ExplicitParent = Get-Prop $Spec 'parent'
         ParentNode     = $ParentNode
         ExistingId     = $null
@@ -199,7 +210,10 @@ function Invoke-Add {
     }
 
     $created = New-ClickUpTask -ListId $List -Name $Name -Description $Description `
-                               -Parent $Parent -Status $Status -Assignees $Assignee
+                               -Parent $Parent -Status $Status `
+                               -Assignees (Resolve-ClickUpAssignees $Assignee) `
+                               -Priority $Priority -DueDate $Due -StartDate $Start `
+                               -TimeEstimate $Estimate -Tags $Tag
     Write-Host ("created  {0}  {1}" -f $created.id, $Name)
     Write-Host ("         {0}" -f (Get-Prop $created 'url' ''))
     return 0
@@ -209,20 +223,25 @@ function Invoke-Add {
 function Invoke-Set {
     if (-not $Target) { Write-Host 'set requires a task id'; return 1 }
 
-    $fields = @{}
-    if ($Status)                       { $fields['status'] = $Status }
-    if ($Name)                         { $fields['name'] = $Name }
+    $fields = New-ClickUpTaskBody -Name $Name -Status $Status `
+        -Priority $Priority -DueDate $Due -StartDate $Start `
+        -TimeEstimate $Estimate -Tags $Tag
     if ($script:Bound.ContainsKey('Description')) {
         $fields['markdown_content'] = $Description
     }
+    if ($Assignee -and $Assignee.Count -gt 0) {
+        # Update takes add/rem rather than a flat list.
+        $fields['assignees'] = @{ add = @(Resolve-ClickUpAssignees $Assignee) }
+    }
     if ($fields.Count -eq 0) {
-        Write-Host 'Nothing to change. Pass -Status, -Name, or -Description.'
+        Write-Host ('Nothing to change. Pass -Status, -Name, -Description, ' +
+                    '-Priority, -Due, -Start, -Estimate, -Tag, or -Assignee.')
         return 1
     }
     if ($List -and -not (Test-Status -ListId $List -Wanted @($Status))) { return 1 }
 
-    Write-Host ("  ~ {0} -> {1}" -f $Target, (($fields.Keys | ForEach-Object {
-        "$_=$($fields[$_])" }) -join ', '))
+    Write-Host ("  ~ {0} -> {1}" -f $Target, ((@($fields.Keys | Sort-Object) |
+        ForEach-Object { "$_=$($fields[$_])" }) -join ', '))
 
     if ($DryRun) {
         Write-Host "`nDry run. Drop -DryRun to write."
@@ -302,13 +321,41 @@ function Invoke-Apply {
                                    -Description $node.Description `
                                    -Parent (Get-NodeParentId $node) `
                                    -Status $node.Status `
-                                   -Assignees @($node.Assignees)
+                                   -Assignees (Resolve-ClickUpAssignees $node.Assignees) `
+                                   -Priority $node.Priority -DueDate $node.DueDate `
+                                   -StartDate $node.StartDate `
+                                   -TimeEstimate $node.TimeEstimate -Tags $node.Tags
         $node.CreatedId = $created.id
         Write-Host ("created  {0}  {1}" -f $created.id, $node.Name)
     }
 
     Write-Host ("`nDone. {0} created, {1} API calls." -f $missing.Count,
                 (Get-ClickUpCallCount))
+    return 0
+}
+
+
+function Invoke-Delete {
+    <#.SYNOPSIS Remove a task. Refuses without -Yes: nothing else here destroys data.#>
+    if (-not $Target) { Write-Host 'delete requires a task id'; return 1 }
+    $task = Get-ClickUpTask -TaskId $Target
+    $kids = @(Get-Prop $task 'subtasks' @())
+    Write-Host ("  - {0}  {1}" -f $task.id, $task.name)
+    if ($kids.Count -gt 0) {
+        Write-Host ("    and its {0} subtask(s):" -f $kids.Count)
+        foreach ($kid in $kids) {
+            Write-Host ("      {0,-12} {1}" -f $kid.id, $kid.name)
+        }
+    }
+
+    if (-not $Yes) {
+        Write-Host "`nRefusing to delete without -Yes."
+        return 1
+    }
+
+    [void](Remove-ClickUpTask -TaskId $Target)
+    Write-Host ("deleted  {0}" -f $Target)
+    Write-Host 'ClickUp keeps it in the workspace trash for 30 days.'
     return 0
 }
 
@@ -338,6 +385,7 @@ try {
         'add'      { exit (Invoke-Add) }
         'set'      { exit (Invoke-Set) }
         'apply'    { exit (Invoke-Apply) }
+        'delete'   { exit (Invoke-Delete) }
         'show'     { exit (Invoke-Show) }
         'statuses' { exit (Invoke-Statuses) }
     }
@@ -350,6 +398,6 @@ try {
         Write-Host 'Re-running is safe: what already landed will be skipped.'
         exit 2
     }
-    Write-Error $message
+    [Console]::Error.WriteLine($message)
     exit 1
 }

@@ -1,54 +1,119 @@
 {
   "_comment": "Shared by both mocks. Edit here and both implementations see the same workspace, which is what makes an output diff mean drift rather than test skew.",
-
   "teams": [
-    { "id": "9016376012", "name": "Workspace" }
+    {
+      "id": "9016376012",
+      "name": "Workspace"
+    }
   ],
-
   "spaces": {
     "9016376012": [
-      { "id": "90161372882", "name": "Software Development" }
+      {
+        "id": "90161372882",
+        "name": "Software Development"
+      }
     ]
   },
-
   "folders": {
     "90161372882": [
-      { "id": "901610445259", "name": "HRIS" }
+      {
+        "id": "901610445259",
+        "name": "HRIS"
+      }
     ]
   },
-
   "folder_lists": {
     "901610445259": [
-      { "id": "901615936216", "name": "API", "task_count": 4 }
+      {
+        "id": "901615936216",
+        "name": "API",
+        "task_count": 4
+      }
     ]
   },
-
   "folderless_lists": {
     "90161372882": [
-      { "id": "901603319733", "name": "General Activities", "task_count": 0 }
+      {
+        "id": "901603319733",
+        "name": "General Activities",
+        "task_count": 0
+      }
     ]
   },
-
-  "statuses": ["completed", "in progress", "in review"],
-
+  "statuses": [
+    "completed",
+    "in progress",
+    "in review"
+  ],
   "lists": {
-    "901615936216": { "id": "901615936216", "name": "API" },
-    "901603319733": { "id": "901603319733", "name": "General Activities" }
+    "901615936216": {
+      "id": "901615936216",
+      "name": "API"
+    },
+    "901603319733": {
+      "id": "901603319733",
+      "name": "General Activities"
+    }
   },
-
   "tasks": {
     "901615936216": [
-      { "id": "t1", "name": "Payroll", "parent": null, "status": "completed",
-        "assignees": ["jgb"], "description": "Cutoffs and payslips." },
-      { "id": "t2", "name": "Payslips", "parent": "t1", "status": "completed",
-        "assignees": [], "description": "Server-computed money fields." },
-      { "id": "t3", "name": "Payroll Export", "parent": "t1", "status": "in progress",
-        "assignees": ["jgb"], "description": "" },
-      { "id": "t4", "name": "Orphan Subtask", "parent": "gone", "status": "completed",
-        "assignees": [], "description": "Parent is not on this list." },
-      { "id": "t5", "name": "Employee Self-Service", "parent": null, "status": "in review",
-        "assignees": [], "description": "" }
+      {
+        "id": "t1",
+        "name": "Payroll",
+        "parent": null,
+        "status": "completed",
+        "assignees": [
+          "jgb"
+        ],
+        "description": "Cutoffs and payslips."
+      },
+      {
+        "id": "t2",
+        "name": "Payslips",
+        "parent": "t1",
+        "status": "completed",
+        "assignees": [],
+        "description": "Server-computed money fields."
+      },
+      {
+        "id": "t3",
+        "name": "Payroll Export",
+        "parent": "t1",
+        "status": "in progress",
+        "assignees": [
+          "jgb"
+        ],
+        "description": ""
+      },
+      {
+        "id": "t4",
+        "name": "Orphan Subtask",
+        "parent": "gone",
+        "status": "completed",
+        "assignees": [],
+        "description": "Parent is not on this list."
+      },
+      {
+        "id": "t5",
+        "name": "Employee Self-Service",
+        "parent": null,
+        "status": "in review",
+        "assignees": [],
+        "description": ""
+      }
     ],
     "901603319733": []
-  }
+  },
+  "members": [
+    {
+      "id": 88978416,
+      "username": "John Gabriel Bagacina",
+      "email": "jgb@example.com"
+    },
+    {
+      "id": 89028240,
+      "username": "Raymart Amoranto",
+      "email": "ray@example.com"
+    }
+  ]
 }

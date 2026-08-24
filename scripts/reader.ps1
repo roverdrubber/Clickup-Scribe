@@ -22,7 +22,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('tree', 'tasks', 'get', 'find', 'export')]
+    [ValidateSet('tree', 'tasks', 'get', 'find', 'members', 'export')]
     [string]$Command,
 
     # Task id for `get`, keyword for `find`.
@@ -352,6 +352,17 @@ function Invoke-Find {
 }
 
 
+function Invoke-Members {
+    <#.SYNOPSIS Numeric ids for `scribe -Assignee` and a spec's `assignees`.#>
+    $people = Get-ClickUpMembers
+    if ($Json) { $people | ConvertTo-Json -Depth 6; return }
+    foreach ($person in $people) {
+        Write-Host ("{0,-12} {1,-28} {2}" -f $person.id, $person.username, $person.email)
+    }
+    Write-Host ("`n{0} member(s), {1} API calls." -f @($people).Count, (Get-ClickUpCallCount))
+}
+
+
 function Invoke-Export {
     if (-not $List) { Write-Host 'export requires -List'; $script:Code = 1; return }
     $roots = Get-NestedTasks -Tasks (Get-ClickUpTasks -ListId $List)
@@ -371,6 +382,7 @@ try {
         'tasks'  { Invoke-Tasks }
         'get'    { Invoke-Get }
         'find'   { Invoke-Find }
+        'members' { Invoke-Members }
         'export' { Invoke-Export }
     }
     exit $script:Code
@@ -381,6 +393,6 @@ try {
         Write-Host ("`nRate limited. Retry in {0:N0} minutes." -f ($seconds / 60))
         exit 2
     }
-    Write-Error $message
+    [Console]::Error.WriteLine($message)
     exit 1
 }

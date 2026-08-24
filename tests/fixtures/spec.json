@@ -1,26 +1,42 @@
 {
   "_comment": "Exercises every placement mode the runners support: a new parent with nested children, attachment to a task already on the board, an inherited default status, a per-task override, and a status fix on an existing task.",
-
   "list_id": "901615936216",
-
   "defaults": {
-    "status": "completed"
+    "status": "completed",
+    "priority": "normal"
   },
-
   "status_fixes": [
-    { "task_id": "t5", "status": "completed" }
+    {
+      "task_id": "t5",
+      "status": "completed"
+    }
   ],
-
   "tasks": [
     {
       "name": "Attendance",
       "description": "Capture time in and time out.",
       "children": [
-        { "name": "Attendance Devices", "description": "Register devices. Rotate the key." },
-        { "name": "Biometric Intake", "description": "Device pushes punches.",
-          "status": "in progress" }
+        {
+          "name": "Attendance Devices",
+          "description": "Register devices. Rotate the key.",
+          "priority": "high",
+          "due_date": "2026-09-01"
+        },
+        {
+          "name": "Biometric Intake",
+          "description": "Device pushes punches.",
+          "status": "in progress",
+          "tags": [
+            "hardware"
+          ]
+        }
       ]
     },
-    { "name": "Payslip PDF", "parent": "t1", "description": "Printable payslip." }
+    {
+      "name": "Payslip PDF",
+      "parent": "t1",
+      "description": "Printable payslip.",
+      "time_estimate": 90
+    }
   ]
 }

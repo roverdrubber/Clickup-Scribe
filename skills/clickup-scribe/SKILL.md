@@ -74,6 +74,10 @@ scribe.py add --list 901615936216 --name "Payroll Export" \
 Checks the name against the list first and does nothing if it is already there.
 `--dry-run` to preview, `--allow-duplicate` to create unconditionally.
 
+Fields beyond name and status: `--priority urgent|high|normal|low`,
+`--due` / `--start` as `YYYY-MM-DD[ HH:MM]`, `--estimate` in minutes, `--tag`
+(repeatable), `--assignee` taking an id, email, or username.
+
 **Update one task:**
 
 ```bash
@@ -82,6 +86,21 @@ scribe.py set 86d44avm2 --status completed
 ```powershell
 .\scribe.ps1 set 86d44avm2 -Status completed
 ```
+
+`set` takes the same field flags as `add`.
+
+**Remove a task:**
+
+```bash
+scribe.py delete 86d44avm2 --yes
+```
+```powershell
+.\scribe.ps1 delete 86d44avm2 -Yes
+```
+
+Without `--yes` it prints what would go - the task and its subtasks - and
+refuses. Deleted tasks sit in the workspace trash for 30 days. This is the only
+command here that destroys anything.
 
 **A whole tree:**
 
@@ -148,6 +167,13 @@ conventions worth copying rather than reinventing.
 
 **Names are the idempotency key.** Renaming in a spec creates a second copy
 rather than renaming the original; use the `set` command for that.
+
+**Tags must already exist** in the space. Creating a tag is not something this
+covers - the MCP's `add_tag_to_task` handles that, or the UI.
+
+**Descriptions are not reconciled.** `apply` creates what is missing; it does
+not update the description, priority, or dates of a task that already exists.
+Use `set` for that.
 
 ## Reference
 

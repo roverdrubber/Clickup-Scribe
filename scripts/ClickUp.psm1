@@ -17,6 +17,10 @@
 Set-StrictMode -Version 2.0
 
 $script:Api = 'https://api.clickup.com/api/v2'
+
+# ClickUp stores priority as 1-4. Nobody remembers which way round it runs, so
+# both the CLI and specs accept the names and this maps them.
+$script:Priorities = [ordered]@{ urgent = 1; high = 2; normal = 3; low = 4 }
 $script:Calls = 0
 $script:LastCall = [DateTime]::MinValue
 $script:PaceMs = 150
@@ -27,6 +31,161 @@ $script:PaceMs = 150
 if ($PSVersionTable.PSVersion.Major -lt 6) {
     [Net.ServicePointManager]::SecurityProtocol =
         [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11
+}
+
+
+function ConvertTo-Priority {
+    <#.SYNOPSIS Accept 'high', 'HIGH', or 2. Returns $null for an empty value.#>
+    param($Value)
+    if ($null -eq $Value -or "$Value" -eq '') { return $null }
+    $key = "$Value".Trim().ToLower()
+    if ($key -match '^[0-9]+$') {
+        $number = [int]$key
+        if ($script:Priorities.Values -notcontains $number) {
+            throw "priority must be 1-4, got $number"
+        }
+        return $number
+    }
+    if (-not $script:Priorities.Contains($key)) {
+        throw ("unknown priority '{0}'. Use one of: {1}" -f $Value,
+               ($script:Priorities.Keys -join ', '))
+    }
+    return $script:Priorities[$key]
+}
+
+
+function ConvertTo-EpochMs {
+    <#
+    .SYNOPSIS
+        'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM' -> @(milliseconds, hasTime).
+    .DESCRIPTION
+        ClickUp wants milliseconds since the epoch plus a separate flag saying
+        whether the time half is meaningful; a date with no time renders as an
+        all-day due date rather than midnight. Parsed as local time, matching
+        the Python implementation.
+    #>
+    param($Value)
+    if ($null -eq $Value -or "$Value" -eq '') { return $null }
+    $text = "$Value".Trim()
+    if ($text -match '^[0-9]{10,}$') { return @([long]$text, $true) }
+
+    $formats = @(@('yyyy-MM-dd HH:mm', $true), @('yyyy-MM-dd', $false))
+    foreach ($pair in $formats) {
+        $parsed = [DateTime]::MinValue
+        $ok = [DateTime]::TryParseExact($text, $pair[0],
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::None, [ref]$parsed)
+        if ($ok) {
+            $local = [DateTime]::SpecifyKind($parsed, [DateTimeKind]::Local)
+            $ms = [long]([DateTimeOffset]::new($local)).ToUnixTimeMilliseconds()
+            return @($ms, $pair[1])
+        }
+    }
+    throw "cannot read date '$Value'. Use YYYY-MM-DD or YYYY-MM-DD HH:MM."
+}
+
+
+function New-ClickUpTaskBody {
+    <#
+    .SYNOPSIS
+        The fields shared by create and update, omitting anything unset.
+    .DESCRIPTION
+        Sending a field as null is not the same as omitting it - ClickUp reads
+        an explicit null as "clear this" - so only what the caller actually
+        supplied goes into the body.
+    #>
+    param(
+        [string]$Name, [string]$Description, [string]$Parent, [string]$Status,
+        [int[]]$Assignees, $Priority, $DueDate, $StartDate,
+        $TimeEstimate, [string[]]$Tags
+    )
+    $body = @{}
+    if ($Name)        { $body['name'] = $Name }
+    if ($Description) { $body['markdown_content'] = $Description }
+    if ($Parent)      { $body['parent'] = $Parent }
+    if ($Status)      { $body['status'] = $Status }
+    if ($Assignees -and $Assignees.Count -gt 0) { $body['assignees'] = @($Assignees) }
+
+    $level = ConvertTo-Priority -Value $Priority
+    if ($null -ne $level) { $body['priority'] = $level }
+
+    $due = ConvertTo-EpochMs -Value $DueDate
+    if ($null -ne $due) { $body['due_date'] = $due[0]; $body['due_date_time'] = $due[1] }
+
+    $start = ConvertTo-EpochMs -Value $StartDate
+    if ($null -ne $start) { $body['start_date'] = $start[0]; $body['start_date_time'] = $start[1] }
+
+    if ($TimeEstimate) { $body['time_estimate'] = [int]$TimeEstimate }
+    if ($Tags -and $Tags.Count -gt 0) { $body['tags'] = @($Tags) }
+    return $body
+}
+
+
+function Get-ClickUpMembers {
+    <#
+    .SYNOPSIS
+        Everyone across every visible workspace: id, username, email.
+    .DESCRIPTION
+        GET /team already embeds members, so this costs one call rather than
+        one per workspace.
+    #>
+    param()
+    $people = @{}
+    foreach ($team in (Get-ClickUpTeams)) {
+        $members = @()
+        if ($team.PSObject.Properties.Name -contains 'members') { $members = @($team.members) }
+        foreach ($member in $members) {
+            $user = $member
+            if ($member.PSObject.Properties.Name -contains 'user') { $user = $member.user }
+            if ($null -eq $user.id) { continue }
+            $name = ''
+            if ($user.PSObject.Properties.Name -contains 'username' -and $user.username) { $name = $user.username }
+            $mail = ''
+            if ($user.PSObject.Properties.Name -contains 'email' -and $user.email) { $mail = $user.email }
+            $teamName = ''
+            if ($team.PSObject.Properties.Name -contains 'name') { $teamName = $team.name }
+            $people[[string]$user.id] = [ordered]@{
+                id = $user.id; username = $name; email = $mail; workspace = $teamName
+            }
+        }
+    }
+    return @($people.Values | Sort-Object { $_.username }, { $_.id })
+}
+
+
+function Resolve-ClickUpAssignees {
+    <#
+    .SYNOPSIS
+        Turn ids, emails, or usernames into numeric ids.
+    .DESCRIPTION
+        Numeric values pass straight through, so the common case costs nothing.
+        A lookup happens only when a name or email is actually present.
+    #>
+    param($Values)
+    $wanted = @($Values | Where-Object { $null -ne $_ -and "$_" -ne '' })
+    if ($wanted.Count -eq 0) { return @() }
+    if (-not ($wanted | Where-Object { "$_" -notmatch '^[0-9]+$' })) {
+        return @($wanted | ForEach-Object { [int]"$_" })
+    }
+
+    $people = Get-ClickUpMembers
+    $resolved = @()
+    foreach ($value in $wanted) {
+        $text = "$value"
+        if ($text -match '^[0-9]+$') { $resolved += [int]$text; continue }
+        $match = @($people | Where-Object {
+            $_.email.ToLower() -eq $text.ToLower() -or
+            $_.username.ToLower() -eq $text.ToLower() })
+        if ($match.Count -eq 0) {
+            throw ("no workspace member matches '{0}'. Run the reader's ``members`` command to list them." -f $value)
+        }
+        if ($match.Count -gt 1) {
+            throw ("'{0}' matches several members ({1}). Use the id." -f $value,
+                   (($match | ForEach-Object { $_.id }) -join ', '))
+        }
+        $resolved += [int]$match[0].id
+    }
+    return $resolved
 }
 
 
@@ -102,7 +261,7 @@ function Invoke-ClickUp {
         change, which costs far more to reconcile than a slow run.
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('GET', 'POST', 'PUT')][string]$Method,
+        [Parameter(Mandatory)][ValidateSet('GET', 'POST', 'PUT', 'DELETE')][string]$Method,
         [Parameter(Mandatory)][string]$Path,
         $Body = $null,
         [int]$Retries = 2
@@ -280,18 +439,26 @@ function New-ClickUpTask {
         [string]$Description = '',
         [string]$Parent = $null,
         [string]$Status = $null,
-        [int[]]$Assignees = @()
+        [int[]]$Assignees = @(),
+        $Priority = $null,
+        $DueDate = $null,
+        $StartDate = $null,
+        $TimeEstimate = $null,
+        [string[]]$Tags = @()
     )
 
-    $body = @{ name = $Name }
-    if ($Description) { $body['markdown_content'] = $Description }
-    if ($Parent)      { $body['parent'] = $Parent }
-    if ($Status)      { $body['status'] = $Status }
-    if ($Assignees -and $Assignees.Count -gt 0) {
-        # Force an array even for one element, or ConvertTo-Json emits a scalar.
-        $body['assignees'] = @($Assignees)
-    }
+    $body = New-ClickUpTaskBody -Name $Name -Description $Description `
+        -Parent $Parent -Status $Status -Assignees $Assignees `
+        -Priority $Priority -DueDate $DueDate -StartDate $StartDate `
+        -TimeEstimate $TimeEstimate -Tags $Tags
     return Invoke-ClickUp -Method POST -Path "/list/$ListId/task" -Body $body
+}
+
+
+function Remove-ClickUpTask {
+    <#.SYNOPSIS Move a task to the workspace trash. Recoverable there for 30 days.#>
+    param([Parameter(Mandatory)][string]$TaskId)
+    return Invoke-ClickUp -Method DELETE -Path "/task/$TaskId"
 }
 
 
@@ -307,4 +474,6 @@ function Set-ClickUpTask {
 Export-ModuleMember -Function Invoke-ClickUp, Get-ClickUpTasks, Get-ClickUpList,
     Get-ClickUpStatuses, New-ClickUpTask, Set-ClickUpTask, Get-ClickUpToken,
     Get-ClickUpCallCount, Get-ClickUpTask, Get-ClickUpTeams, Get-ClickUpSpaces,
-    Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists
+    Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists,
+    Remove-ClickUpTask, Get-ClickUpMembers, Resolve-ClickUpAssignees,
+    New-ClickUpTaskBody, ConvertTo-Priority, ConvertTo-EpochMs

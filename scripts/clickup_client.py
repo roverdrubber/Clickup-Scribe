@@ -15,8 +15,55 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 
 API = "https://api.clickup.com/api/v2"
+
+# ClickUp stores priority as 1-4. Nobody remembers which way round it runs, so
+# both the CLI and specs accept the names and this maps them.
+PRIORITIES = {"urgent": 1, "high": 2, "normal": 3, "low": 4}
+
+
+def parse_priority(value) -> int | None:
+    """Accept 'high', 'HIGH', or 2. Returns None for an empty value."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        if value not in PRIORITIES.values():
+            raise ClickUpError(f"priority must be 1-4, got {value}")
+        return value
+    key = str(value).strip().lower()
+    if key.isdigit():
+        return parse_priority(int(key))
+    if key not in PRIORITIES:
+        raise ClickUpError(
+            f"unknown priority '{value}'. Use one of: "
+            + ", ".join(PRIORITIES)
+        )
+    return PRIORITIES[key]
+
+
+def parse_date(value) -> tuple[int, bool] | None:
+    """'2026-08-24' or '2026-08-24 17:30' -> (epoch milliseconds, has_time).
+
+    ClickUp wants milliseconds since the epoch plus a separate flag saying
+    whether the time half is meaningful; a date with no time renders as an
+    all-day due date rather than midnight.
+    """
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value, True
+    text = str(value).strip()
+    for fmt, has_time in (("%Y-%m-%d %H:%M", True), ("%Y-%m-%d", False)):
+        try:
+            moment = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return int(moment.timestamp() * 1000), has_time
+    raise ClickUpError(
+        f"cannot read date '{value}'. Use YYYY-MM-DD or YYYY-MM-DD HH:MM."
+    )
 
 
 class ClickUpError(RuntimeError):
@@ -56,6 +103,7 @@ class ClickUp:
 
     def _call(self, method: str, path: str, body: dict | None = None,
               _retries: int = 2) -> dict:
+        assert method in ("GET", "POST", "PUT", "DELETE"), method
         self._throttle()
         request = urllib.request.Request(
             API + path,
@@ -132,6 +180,63 @@ class ClickUp:
         """Workspaces the token can see."""
         return self._call("GET", "/team").get("teams", [])
 
+    def members(self) -> list[dict]:
+        """Everyone across every visible workspace: id, username, email.
+
+        `GET /team` already embeds members, so this costs one call rather than
+        one per workspace.
+        """
+        people: dict[int, dict] = {}
+        for team in self.teams():
+            for member in team.get("members", []):
+                user = member.get("user", member)
+                if user.get("id") is None:
+                    continue
+                people[user["id"]] = {
+                    "id": user["id"],
+                    "username": user.get("username") or "",
+                    "email": user.get("email") or "",
+                    "workspace": team.get("name", ""),
+                }
+        return sorted(people.values(), key=lambda p: (p["username"], p["id"]))
+
+    def resolve_assignees(self, values) -> list[int]:
+        """Turn ids, emails, or usernames into numeric ids.
+
+        Numeric values pass straight through, so the common case costs nothing.
+        A lookup happens only when a name or email is actually present.
+        """
+        wanted = [v for v in (values or []) if v not in (None, "")]
+        if not wanted:
+            return []
+        if all(str(v).isdigit() for v in wanted):
+            return [int(v) for v in wanted]
+
+        people = self.members()
+        resolved = []
+        for value in wanted:
+            text = str(value)
+            if text.isdigit():
+                resolved.append(int(text))
+                continue
+            match = [
+                p for p in people
+                if p["email"].lower() == text.lower()
+                or p["username"].lower() == text.lower()
+            ]
+            if not match:
+                raise ClickUpError(
+                    f"no workspace member matches '{value}'. "
+                    "Run the reader's `members` command to list them."
+                )
+            if len(match) > 1:
+                ids = ", ".join(str(p["id"]) for p in match)
+                raise ClickUpError(
+                    f"'{value}' matches several members ({ids}). Use the id."
+                )
+            resolved.append(match[0]["id"])
+        return resolved
+
     def spaces(self, team_id: str, archived: bool = False) -> list[dict]:
         return self._call(
             "GET", f"/team/{team_id}/space?archived={str(archived).lower()}"
@@ -157,8 +262,33 @@ class ClickUp:
 
     def create_task(self, list_id: str, name: str, description: str = "",
                     parent: str | None = None, status: str | None = None,
-                    assignees: list[int] | None = None) -> dict:
-        body: dict = {"name": name}
+                    assignees: list[int] | None = None,
+                    priority=None, due_date=None, start_date=None,
+                    time_estimate: int | None = None,
+                    tags: list[str] | None = None) -> dict:
+        body = self.task_body(
+            name=name, description=description, parent=parent, status=status,
+            assignees=assignees, priority=priority, due_date=due_date,
+            start_date=start_date, time_estimate=time_estimate, tags=tags,
+        )
+        return self._call("POST", f"/list/{list_id}/task", body)
+
+    @staticmethod
+    def task_body(name: str | None = None, description: str | None = None,
+                  parent: str | None = None, status: str | None = None,
+                  assignees: list[int] | None = None, priority=None,
+                  due_date=None, start_date=None,
+                  time_estimate: int | None = None,
+                  tags: list[str] | None = None) -> dict:
+        """The fields shared by create and update, omitting anything unset.
+
+        Sending a field as null is not the same as omitting it - ClickUp reads
+        an explicit null as "clear this" - so only what the caller actually
+        supplied goes into the body.
+        """
+        body: dict = {}
+        if name:
+            body["name"] = name
         if description:
             body["markdown_content"] = description
         if parent:
@@ -166,8 +296,22 @@ class ClickUp:
         if status:
             body["status"] = status
         if assignees:
-            body["assignees"] = assignees
-        return self._call("POST", f"/list/{list_id}/task", body)
+            body["assignees"] = list(assignees)
+        if (level := parse_priority(priority)) is not None:
+            body["priority"] = level
+        if (due := parse_date(due_date)) is not None:
+            body["due_date"], body["due_date_time"] = due
+        if (start := parse_date(start_date)) is not None:
+            body["start_date"], body["start_date_time"] = start
+        if time_estimate:
+            body["time_estimate"] = int(time_estimate)
+        if tags:
+            body["tags"] = list(tags)
+        return body
+
+    def delete_task(self, task_id: str) -> dict:
+        """Move a task to the workspace trash. Recoverable there for 30 days."""
+        return self._call("DELETE", f"/task/{task_id}")
 
     def update_task(self, task_id: str, **fields) -> dict:
         return self._call("PUT", f"/task/{task_id}", fields)

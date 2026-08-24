@@ -20,6 +20,7 @@ with a warning if neither is present, rather than reporting false parity.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,6 +34,11 @@ MOCKS = Path(__file__).resolve().parent / "mocks"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 LIST_ID = "901615936216"
+
+# The mocks subclass / import the real implementations, so the harness
+# exercises real parsing rather than a second copy of it.
+os.environ["PARITY_REAL_CLIENT"] = str(SCRIPTS / "clickup_client.py")
+os.environ["PARITY_REAL_MODULE"] = str(SCRIPTS / "ClickUp.psm1")
 
 
 # --------------------------------------------------------------------------
@@ -100,6 +106,52 @@ def scenarios() -> list[dict]:
         {"name": "apply: dry run", "tool": "scribe",
          "steps": [([  "apply", spec], ["apply", spec])]},
 
+        {"name": "members", "tool": "reader",
+         "steps": [(["members"], ["members"])]},
+
+        {"name": "add: priority, due date, tags, estimate", "tool": "scribe",
+         "steps": [(["add", "--list", LIST_ID, "--name", "Holidays",
+                     "--priority", "high", "--due", "2026-09-01",
+                     "--tag", "calendar", "--estimate", "90"],
+                    ["add", "-List", LIST_ID, "-Name", "Holidays",
+                     "-Priority", "high", "-Due", "2026-09-01",
+                     "-Tag", "calendar", "-Estimate", "90"])]},
+
+        {"name": "add: rejects unknown priority", "tool": "scribe",
+         "steps": [(["add", "--list", LIST_ID, "--name", "X", "--priority", "massive"],
+                    ["add", "-List", LIST_ID, "-Name", "X", "-Priority", "massive"])]},
+
+        {"name": "add: rejects unreadable date", "tool": "scribe",
+         "steps": [(["add", "--list", LIST_ID, "--name", "X", "--due", "next tuesday"],
+                    ["add", "-List", LIST_ID, "-Name", "X", "-Due", "next tuesday"])]},
+
+        {"name": "add: assignee by email", "tool": "scribe",
+         "steps": [(["add", "--list", LIST_ID, "--name", "Owned",
+                     "--assignee", "jgb@example.com"],
+                    ["add", "-List", LIST_ID, "-Name", "Owned",
+                     "-Assignee", "jgb@example.com"])]},
+
+        {"name": "add: unknown member", "tool": "scribe",
+         "steps": [(["add", "--list", LIST_ID, "--name", "Owned",
+                     "--assignee", "nobody@example.com"],
+                    ["add", "-List", LIST_ID, "-Name", "Owned",
+                     "-Assignee", "nobody@example.com"])]},
+
+        {"name": "set: several fields at once", "tool": "scribe",
+         "steps": [(["set", "t3", "--status", "completed", "--priority", "low",
+                     "--due", "2026-09-30 14:00"],
+                    ["set", "t3", "-Status", "completed", "-Priority", "low",
+                     "-Due", "2026-09-30 14:00"])]},
+
+        {"name": "delete: refuses without confirmation", "tool": "scribe",
+         "steps": [(["delete", "t1"], ["delete", "t1"])]},
+
+        {"name": "delete: with confirmation", "tool": "scribe",
+         "steps": [
+             (["delete", "t1", "--yes"], ["delete", "t1", "-Yes"]),
+             (["show", "--list", LIST_ID], ["show", "-List", LIST_ID]),
+         ]},
+
         {"name": "apply: create, then converged no-op", "tool": "scribe",
          "steps": [
              (["apply", spec, "--apply"], ["apply", spec, "-Apply"]),
@@ -162,6 +214,27 @@ def normalize(text: str) -> str:
     return "\n".join(lines)
 
 
+def canonical(value):
+    """Make two JSON trees comparable across runtimes."""
+    if isinstance(value, dict):
+        return {k: canonical(v) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [canonical(v) for v in value]
+    return value
+
+
+def compare_state(py_dir: Path, ps_dir: Path) -> list[str]:
+    py_state, ps_state = py_dir / "state.json", ps_dir / "state.json"
+    if py_state.exists() != ps_state.exists():
+        which = "python" if py_state.exists() else "powershell"
+        return [f"only {which} wrote state"]
+    if not py_state.exists():
+        return []
+    left = canonical(json.loads(py_state.read_text()))
+    right = canonical(json.loads(ps_state.read_text()))
+    return [] if left == right else ["recorded writes differ"]
+
+
 def compare(label: str, py_out: str, ps_out: str, py_rc: int, ps_rc: int,
             as_json: bool) -> list[str]:
     problems = []
@@ -220,6 +293,9 @@ def main() -> int:
                 last = (py_out, ps_out)
                 problems += compare(scenario["name"], py_out, ps_out,
                                     py_rc, ps_rc, as_json)
+            # Printed output can match while the writes differ. Compare the
+            # recorded effects too - bodies, updates, deletions.
+            problems += compare_state(py_dir, ps_dir)
         finally:
             shutil.rmtree(py_dir, ignore_errors=True)
             shutil.rmtree(ps_dir, ignore_errors=True)

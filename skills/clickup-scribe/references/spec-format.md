@@ -44,7 +44,12 @@ declarative: re-running against the same spec converges on the same board.
 | `children` | task, optional | Created as subtasks, after their parent and using its id. |
 | `parent` | task, optional | An **existing** task id to attach to. Use when extending a board you did not create in this run. |
 | `status` | task, optional | Overrides `defaults.status`. Validated against the list before anything is written. |
-| `assignees` | task, optional | Array of numeric user ids. Overrides `defaults.assignees`. |
+| `assignees` | task, optional | User ids, emails, or usernames. Overrides `defaults.assignees`. |
+| `priority` | task, optional | `urgent`, `high`, `normal`, `low`, or 1-4. |
+| `due_date` | task, optional | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. Date alone becomes an all-day due date. |
+| `start_date` | task, optional | Same formats as `due_date`. |
+| `time_estimate` | task, optional | Minutes, as a number. |
+| `tags` | task, optional | Array of tag names. They must already exist in the space. |
 
 `children` and `parent` are the two ways to place a task. `children` nests
 inside this spec; `parent` points at something already on the board. A task may
@@ -63,9 +68,17 @@ included. Consequences:
 - Descriptions are **not** reconciled. Editing a description in the spec does
   not update an existing task; the runner only creates what is missing.
 
+Anything in `defaults` applies to every task that does not set its own value,
+so a spec whose tasks all share a priority or an assignee states it once.
+
 ## Getting user ids
 
-`assignees` takes numeric ids, not emails. Over MCP,
-`clickup_resolve_assignees` converts a name, email, or `"me"`. Over REST,
-`GET /team` lists members. Either way it is a one-time lookup - record the id
-in the spec and never look it up again.
+`assignees` accepts an email or username as well as a numeric id, resolving it
+against the workspace. That costs one extra call per run, so for a large spec
+prefer ids:
+
+```bash
+reader.py members          # id, username, email
+```
+
+Record the id in the spec and the lookup never happens again.
