@@ -24,9 +24,12 @@ interactive calls it is sized for.
 ## Install
 
 ```bash
-/plugin marketplace add ~/Projects/Personal/clickup-scribe
+/plugin marketplace add /path/to/clickup-scribe    # wherever you cloned it
 /plugin install clickup-scribe@clickup-scribe-marketplace
 ```
+
+Nothing in the plugin depends on that location: scripts resolve their own
+paths, so it works from a clone, a marketplace install, or anywhere else.
 
 ## Requirements
 

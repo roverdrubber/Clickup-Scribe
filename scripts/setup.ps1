@@ -57,6 +57,13 @@ function Invoke-Clear {
 
 
 function Invoke-Store {
+    if ([Console]::IsInputRedirected) {
+        [Console]::Error.WriteLine(
+            'store needs a terminal: the prompt is hidden so the token is not echoed.')
+        [Console]::Error.WriteLine(
+            'Run it in your own shell, or set $env:CLICKUP_TOKEN for a one-off.')
+        return 1
+    }
     Write-Host 'ClickUp > Settings > Apps > API Token. Starts with pk_.'
     $secure = Read-Host -Prompt 'Token (not shown)' -AsSecureString
     $token = [Runtime.InteropServices.Marshal]::PtrToStringAuto(

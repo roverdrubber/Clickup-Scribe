@@ -191,6 +191,9 @@ def scenarios() -> list[dict]:
         {"name": "setup: reports nothing configured", "tool": "setup",
          "steps": [(["show"], ["show"])]},
 
+        {"name": "setup: store refuses without a terminal", "tool": "setup",
+         "steps": [(["store"], ["store"])]},
+
         {"name": "setup: clear with nothing stored", "tool": "setup",
          "steps": [(["clear"], ["clear"])]},
 
@@ -248,8 +251,10 @@ def run(cmd: list[str], cwd: Path, extra_env: dict | None = None) -> tuple[str, 
     env["CLICKUP_SCRIBE_HOME"] = str(cwd / "cfg")
     env.pop("CLICKUP_TOKEN", None)
     env.update(extra_env or {})
+    # stdin closed: a command that waits for input would otherwise hang the
+    # whole run rather than failing.
     proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                          timeout=120, env=env)
+                          timeout=120, env=env, stdin=subprocess.DEVNULL)
     return (proc.stdout + proc.stderr), proc.returncode
 
 
@@ -259,6 +264,12 @@ FLAG = re.compile(r"(?<![\w-])--?([A-Za-z][\w-]*)")
 
 # Sandbox paths differ per runtime and per run; the shape is what matters.
 SANDBOX = re.compile(r"/tmp/parity-(py|ps)-\w+")
+
+# Each runtime names its own setup script, and prefixes it differently.
+SETUP = re.compile(r"(python3 )?\S*setup\.(py|ps1)")
+
+# PowerShell writes an environment variable as $env:NAME. Same variable.
+ENVVAR = re.compile(r"\$env:([A-Z_]+)")
 
 
 def normalize(text: str) -> str:
@@ -276,6 +287,8 @@ def normalize(text: str) -> str:
         line = FLAG.sub(lambda m: "<flag:" + m.group(1).lower().replace("-", "") + ">",
                         line)
         line = SANDBOX.sub("<sandbox>", line)
+        line = SETUP.sub("<setup>", line)
+        line = ENVVAR.sub(r"\1", line)
         lines.append(line)
     while lines and not lines[-1]:
         lines.pop()

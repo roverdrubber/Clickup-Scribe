@@ -133,9 +133,14 @@ class ClickUp:
     def __init__(self, token: str | None = None, pace: float = 0.15) -> None:
         self.token = token or find_token() or ""
         if not self.token:
+            # Resolved rather than written down: the plugin may be installed
+            # anywhere, and a path in prose goes stale the moment it moves.
+            from pathlib import Path
+            setup = Path(__file__).resolve().with_name("setup.py")
             raise ClickUpError(
-                "No ClickUp token configured. Run `setup.py store` to be "
-                "prompted for one, or set CLICKUP_TOKEN."
+                "No ClickUp token configured. Run this in your own terminal:\n"
+                f"    python3 {setup} store\n"
+                "or set CLICKUP_TOKEN for a one-off."
             )
         self.pace = pace
         self.calls = 0

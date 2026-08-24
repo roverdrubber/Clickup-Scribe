@@ -255,8 +255,12 @@ function Get-ClickUpToken {
         $stored = (Get-Content $path -Raw -ErrorAction SilentlyContinue)
         if (-not [string]::IsNullOrWhiteSpace($stored)) { return $stored.Trim() }
     }
-    throw ('No ClickUp token configured. Run `setup.ps1 store` to be prompted ' +
-           'for one, or set $env:CLICKUP_TOKEN.')
+    # Resolved rather than written down: the plugin may be installed anywhere,
+    # and a path in prose goes stale the moment it moves.
+    $setup = Join-Path $PSScriptRoot 'setup.ps1'
+    throw ("No ClickUp token configured. Run this in your own terminal:`n" +
+           "    $setup store`n" +
+           'or set $env:CLICKUP_TOKEN for a one-off.')
 }
 
 

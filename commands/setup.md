@@ -36,14 +36,21 @@ is wrong - continue to step 3.
 try to run `setup.py store` yourself: the prompt is hidden, and an agent's
 shell cannot type into it. Anything typed here also lands in the transcript.
 
-Instead, tell them to run this in their own terminal:
+Instead, hand them a command for their own terminal. **Resolve the path
+first** - `${CLAUDE_PLUGIN_ROOT}` is set for you but not for their shell, and
+the plugin may be installed anywhere, so never paste the variable or a
+remembered path:
 
 ```bash
-python3 ~/Projects/Personal/clickup-scribe/scripts/setup.py store
+echo "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/setup.py store"
 ```
-```powershell
-& "$HOME\Projects\Personal\clickup-scribe\scripts\setup.ps1" store
-```
+
+Give them the line that prints. On Windows it is the same idea with
+`setup.ps1` and no `python3`.
+
+The quickest way to get the exact line without thinking about it: run any
+command with no token configured. The error resolves its own location and
+prints the command to run.
 
 Explain what it does: prompts without echoing, verifies the token against the
 API before saving anything, then writes it to a user-only file
