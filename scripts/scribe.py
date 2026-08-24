@@ -163,7 +163,8 @@ def cmd_set(api: ClickUp, args) -> int:
     if args.list and not check_status(api, args.list, {args.status}):
         return 1
 
-    print(f"  ~ {args.task_id} -> {fields}")
+    shown = ", ".join(f"{key}={value}" for key, value in fields.items())
+    print(f"  ~ {args.task_id} -> {shown}")
     if args.dry_run:
         print("\nDry run. Drop --dry-run to write.")
         return 0

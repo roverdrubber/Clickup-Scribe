@@ -222,13 +222,24 @@ function Get-NestedTasks {
             [void]$roots.Add($node)
         }
     }
-    return @($roots.ToArray() | Sort-Object { $_.name })
+    # Sort at every level: hash iteration order is not stable, and unordered
+    # output would make the parity check flap.
+    function Sort-Kids($nodes) {
+        $sorted = @($nodes | Sort-Object { $_.name })
+        foreach ($n in $sorted) {
+            if ($n.children -and @($n.children).Count -gt 0) {
+                $n.children = Sort-Kids $n.children
+            }
+        }
+        return $sorted
+    }
+    return Sort-Kids $roots.ToArray()
 }
 
 
 function Write-TaskNode {
     param($Nodes, [int]$Indent = 0)
-    foreach ($node in @($Nodes | Sort-Object { $_.name })) {
+    foreach ($node in $Nodes) {
         $who = ''
         $names = @($node.assignees | Where-Object { $_ })
         if ($names.Count -gt 0) { $who = "  ($($names -join ', '))" }
@@ -304,7 +315,6 @@ function Invoke-Get {
                         (Get-Prop (Get-Prop $sub 'status') 'status' '?'), $sub.name)
         }
     }
-    return 0
 }
 
 

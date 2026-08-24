@@ -127,22 +127,47 @@ def nest(tasks: list[dict]) -> list[dict]:
     ClickUp returns subtasks flat, each carrying a `parent` id. A subtask whose
     parent is not in the same response (filtered out, or on another list) is
     surfaced at top level rather than dropped.
+
+    Emits one documented shape - id, name, status, parent, assignees,
+    description, children - rather than passing the API row through, so both
+    implementations can produce byte-identical JSON. Use `get --json` when the
+    full raw task is what you need.
     """
-    by_id = {t["id"]: dict(t, children=[]) for t in tasks}
+    by_id = {
+        task["id"]: {
+            "id": task["id"],
+            "name": task["name"],
+            "status": task.get("status", {}).get("status", "?"),
+            "parent": task.get("parent"),
+            "assignees": [a.get("username", "") for a in task.get("assignees", [])],
+            "description": task.get("description", "") or "",
+            "children": [],
+        }
+        for task in tasks
+    }
     roots = []
-    for task in by_id.values():
-        parent = by_id.get(task.get("parent"))
+    for node in by_id.values():
+        parent = by_id.get(node["parent"])
         if parent is not None:
-            parent["children"].append(task)
+            parent["children"].append(node)
         else:
-            roots.append(task)
-    return sorted(roots, key=lambda t: t["name"])
+            roots.append(node)
+
+    # Sort at every level: hash iteration order is not stable across runtimes,
+    # and unordered output would make the parity check flap.
+    def sort_kids(nodes):
+        nodes.sort(key=lambda t: t["name"])
+        for node in nodes:
+            sort_kids(node["children"])
+        return nodes
+
+    return sort_kids(roots)
 
 
 def print_tasks(nodes: list[dict], indent: int = 0) -> None:
-    for node in sorted(nodes, key=lambda t: t["name"]):
-        status = node.get("status", {}).get("status", "?")
-        who = ", ".join(a.get("username", "") for a in node.get("assignees", []))
+    for node in nodes:
+        status = node["status"]
+        who = ", ".join(a for a in node["assignees"] if a)
         who = f"  ({who})" if who else ""
         print(f"  {' ' * indent}{node['id']:<12} {status:<12} {node['name']}{who}")
         print_tasks(node.get("children", []), indent + 2)
@@ -155,8 +180,8 @@ def to_spec(list_id: str, roots: list[dict]) -> dict:
         text = task.get("description") or ""
         if text:
             entry["description"] = text.strip()
-        status = task.get("status", {}).get("status")
-        if status:
+        status = task.get("status")
+        if status and status != "?":
             entry["status"] = status
         children = [convert(c) for c in task.get("children", [])]
         if children:

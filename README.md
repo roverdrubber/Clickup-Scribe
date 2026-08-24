@@ -159,6 +159,10 @@ skills/
       rest-endpoints.md  endpoints, auth, rate limits
       curl-recipes.md    raw curl, for hosts with no runtime
   clickup-read/          reading: hierarchy, tasks, search, export
+tests/
+  parity.py              runs both implementations, diffs the output
+  mocks/                 twin fake clients, one per runtime
+  fixtures/              the shared workspace both mocks read
 examples/
   hris-api-list.json     worked example
 ```
@@ -188,6 +192,20 @@ For a locked-down box, a container, or a single call not worth scripting,
 raw calls, with the shell-quoting differences that trip them up. curl covers
 transport only - it cannot parse JSON, hold a name-to-id map, or page a result
 set, so it is for inspecting and one-off changes, not for loops.
+
+## Parity
+
+Two implementations of one tool drift silently. `tests/parity.py` runs both
+against the same fixture and diffs stdout and exit codes, so a fix that lands
+in one and not the other fails loudly:
+
+```bash
+python3 tests/parity.py       # 15 scenarios
+python3 tests/parity.py -v    # show both outputs on failure
+```
+
+It needs `pwsh` (or `powershell`) on PATH, and says so rather than reporting
+false parity when neither is present.
 
 ## Token handling
 
