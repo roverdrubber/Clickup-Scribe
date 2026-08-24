@@ -129,8 +129,25 @@ scribe.py apply spec.json --apply      # create what is missing
 .\scribe.ps1 apply spec.json -Apply    # create what is missing
 ```
 
-PowerShell uses `-Apply` and `-DryRun` where Python uses `--apply` and
-`--dry-run`; everything else maps one to one.
+**Converge an existing board** with `--reconcile` / `-Reconcile`:
+
+```bash
+scribe.py apply spec.json --reconcile              # show drift
+scribe.py apply spec.json --apply --reconcile      # create AND update
+```
+
+Without it, `apply` only creates what is missing and leaves existing tasks
+untouched - which is the safe default, since a task may have been edited in
+the UI on purpose.
+
+**Only fields the spec declares are compared.** A spec silent about priority
+never changes a priority. `description` is deliberately excluded: the write
+field is `markdown_content` and the read field is a normalised `description`,
+so equality is unreliable and every run would re-send the same text. Assignees
+are excluded too - updates use add/remove semantics rather than a flat list.
+
+PowerShell uses `-Apply`, `-DryRun`, and `-Reconcile` where Python uses
+`--apply`, `--dry-run`, and `--reconcile`; everything else maps one to one.
 
 **Read the board:**
 
@@ -187,9 +204,11 @@ rather than renaming the original; use the `set` command for that.
 **Tags must already exist** in the space. Creating a tag is not something this
 covers - the MCP's `add_tag_to_task` handles that, or the UI.
 
-**Descriptions are not reconciled.** `apply` creates what is missing; it does
-not update the description, priority, or dates of a task that already exists.
-Use `set` for that.
+**Descriptions are never reconciled**, even with `--reconcile`. Use `set` to
+change one.
+
+**`--estimate` and `time_estimate` are minutes.** The API counts milliseconds;
+both are converted for you, so `90` means an hour and a half.
 
 ## Still not covered
 

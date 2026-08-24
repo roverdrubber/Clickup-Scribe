@@ -115,7 +115,9 @@ function New-ClickUpTaskBody {
     $start = ConvertTo-EpochMs -Value $StartDate
     if ($null -ne $start) { $body['start_date'] = $start[0]; $body['start_date_time'] = $start[1] }
 
-    if ($TimeEstimate) { $body['time_estimate'] = [int]$TimeEstimate }
+    # The API counts milliseconds; the CLI and specs take minutes, which is
+    # what a person means and what the MCP also accepts.
+    if ($TimeEstimate) { $body['time_estimate'] = [int]$TimeEstimate * 60000 }
     if ($Tags -and $Tags.Count -gt 0) { $body['tags'] = @($Tags) }
     return $body
 }
@@ -484,6 +486,75 @@ function New-ClickUpList {
 }
 
 
+function Get-ClickUpDrift {
+    <#
+    .SYNOPSIS
+        Fields in $Wanted that the live task does not already match.
+    .DESCRIPTION
+        Only what the spec declares is compared, so a field the spec is silent
+        about is never touched - a priority set by hand in the UI survives a
+        spec that says nothing about priority.
+
+        `description` is deliberately not reconciled. We send markdown_content
+        and ClickUp returns a normalised description, so equality is not
+        reliable and every run would re-send the same text.
+    #>
+    param($Current, [hashtable]$Wanted)
+
+    $skip = @('name', 'markdown_content', 'parent', 'assignees',
+              'due_date_time', 'start_date_time')
+    $changed = @{}
+
+    function Get-Cur($obj, $key) {
+        if ($null -eq $obj) { return $null }
+        if ($obj.PSObject.Properties.Name -notcontains $key) { return $null }
+        return $obj.$key
+    }
+
+    foreach ($key in @($Wanted.Keys | Sort-Object)) {
+        if ($skip -contains $key) { continue }
+        $value = $Wanted[$key]
+
+        if ($key -eq 'status') {
+            $live = $null
+            $st = Get-Cur $Current 'status'
+            if ($st) { $live = Get-Cur $st 'status' }
+            if ($live -ne $value) { $changed['status'] = $value }
+        }
+        elseif ($key -eq 'priority') {
+            $raw = Get-Cur $Current 'priority'
+            if ($raw -and $raw.PSObject.Properties.Name -contains 'priority') {
+                $raw = $raw.priority
+            }
+            $live = $null
+            if ($null -ne $raw -and "$raw" -ne '') { $live = [int]"$raw" }
+            if ($live -ne $value) { $changed['priority'] = $value }
+        }
+        elseif (@('due_date', 'start_date', 'time_estimate') -contains $key) {
+            $raw = Get-Cur $Current $key
+            $live = $null
+            if ($null -ne $raw -and "$raw" -ne '') { $live = [long]"$raw" }
+            if ($live -ne [long]$value) {
+                $changed[$key] = $value
+                $flag = "${key}_time"
+                if ($Wanted.ContainsKey($flag)) { $changed[$flag] = $Wanted[$flag] }
+            }
+        }
+        elseif ($key -eq 'tags') {
+            $liveTags = @()
+            foreach ($t in @(Get-Cur $Current 'tags')) {
+                if ($t -is [string]) { $liveTags += $t }
+                elseif ($t.PSObject.Properties.Name -contains 'name') { $liveTags += $t.name }
+            }
+            $a = (@($liveTags | Sort-Object) -join '|')
+            $b = (@($value | Sort-Object) -join '|')
+            if ($a -ne $b) { $changed['tags'] = $value }
+        }
+    }
+    return $changed
+}
+
+
 function Remove-ClickUpTask {
     <#.SYNOPSIS Move a task to the workspace trash. Recoverable there for 30 days.#>
     param([Parameter(Mandatory)][string]$TaskId)
@@ -506,4 +577,4 @@ Export-ModuleMember -Function Invoke-ClickUp, Get-ClickUpTasks, Get-ClickUpList,
     Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists,
     Remove-ClickUpTask, Get-ClickUpMembers, Resolve-ClickUpAssignees,
     New-ClickUpTaskBody, ConvertTo-Priority, ConvertTo-EpochMs,
-    New-ClickUpFolder, New-ClickUpList
+    New-ClickUpFolder, New-ClickUpList, Get-ClickUpDrift

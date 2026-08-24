@@ -1,0 +1,15 @@
+{
+  "_comment": "Targets t3 'Payroll Export', which the fixture gives priority 3 and tag 'stale'. Declared fields drift; undeclared ones must be left alone.",
+  "list_id": "901615936216",
+  "tasks": [
+    {
+      "name": "Payroll Export",
+      "priority": "urgent",
+      "tags": [
+        "payroll"
+      ],
+      "due_date": "2026-10-01",
+      "status": "completed"
+    }
+  ]
+}

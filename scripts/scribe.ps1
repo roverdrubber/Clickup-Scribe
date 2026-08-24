@@ -55,6 +55,7 @@ param(
     [switch]$AllowDuplicate,
     [switch]$DryRun,
     [switch]$Apply,
+    [switch]$Reconcile,
     [switch]$Yes
 )
 
@@ -141,6 +142,14 @@ function Get-NodeList {
 }
 
 
+function Format-FieldValue {
+    <#.SYNOPSIS Render a value the same way both runtimes do.#>
+    param($Value)
+    if ($Value -is [array]) { return (@($Value) -join ',') }
+    return "$Value"
+}
+
+
 function Write-Tree {
     param($Nodes, [int]$Indent = 0)
     foreach ($node in $Nodes) {
@@ -153,15 +162,23 @@ function Write-Tree {
 
 
 function Read-Board {
-    <#.SYNOPSIS name -> id and id -> status for a whole list. One paged read.#>
+    <#
+    .SYNOPSIS
+        name -> id, id -> status, id -> full task for a list. One paged read.
+    .DESCRIPTION
+        The full rows are kept because reconciliation compares against fields
+        the name/status pair does not carry.
+    #>
     param([string]$ListId)
     $names = @{}
     $statuses = @{}
+    $byId = @{}
     foreach ($task in (Get-ClickUpTasks -ListId $ListId)) {
         if (-not $names.ContainsKey($task.name)) { $names[$task.name] = $task.id }
         $statuses[$task.id] = $task.status.status
+        $byId[$task.id] = $task
     }
-    return @{ Names = $names; Statuses = $statuses }
+    return @{ Names = $names; Statuses = $statuses; ById = $byId }
 }
 
 
@@ -245,7 +262,7 @@ function Invoke-Set {
     if ($List -and -not (Test-Status -ListId $List -Wanted @($Status))) { return 1 }
 
     Write-Host ("  ~ {0} -> {1}" -f $Target, ((@($fields.Keys | Sort-Object) |
-        ForEach-Object { "$_=$($fields[$_])" }) -join ', '))
+        ForEach-Object { "$_=$(Format-FieldValue $fields[$_])" }) -join ', '))
 
     if ($DryRun) {
         Write-Host "`nDry run. Drop -DryRun to write."
@@ -275,7 +292,9 @@ function Invoke-Apply {
     foreach ($task in $specTasks) {
         $roots += ,(New-SpecNode -Spec $task -Defaults $defaults)
     }
-    $nodes = Get-NodeList -Nodes $roots
+    # A single-node spec unrolls to a bare hashtable, whose .Count is its key
+    # count, not 1. Force an array.
+    $nodes = @(Get-NodeList -Nodes $roots)
 
     $wanted = @($nodes | ForEach-Object { $_.Status })
     $wanted += @($statusFixes | ForEach-Object { $_.status })
@@ -294,10 +313,33 @@ function Invoke-Apply {
               $board.Statuses[$_.task_id] -eq $_.status)
     })
 
+    # Convergence: an existing task whose declared fields no longer match.
+    $updates = @()
+    if ($Reconcile) {
+        foreach ($node in $nodes) {
+            if (-not $node.ExistingId) { continue }
+            $wantedBody = New-ClickUpTaskBody -Status $node.Status `
+                -Priority $node.Priority -DueDate $node.DueDate `
+                -StartDate $node.StartDate -TimeEstimate $node.TimeEstimate `
+                -Tags $node.Tags
+            $changed = Get-ClickUpDrift -Current $board.ById[$node.ExistingId] `
+                                        -Wanted $wantedBody
+            if ($changed.Count -gt 0) {
+                $updates += ,@{ Node = $node; Changed = $changed }
+            }
+        }
+    }
+
     $missing = @($nodes | Where-Object { -not $_.ExistingId })
     Write-Host ("list {0}: {1} tasks present" -f $listId, $board.Names.Count)
-    Write-Host ("spec: {0} entries, {1} to create`n" -f $nodes.Count, $missing.Count)
+    Write-Host ("spec: {0} entries, {1} to create, {2} to update`n" -f
+                $nodes.Count, $missing.Count, @($updates).Count)
     Write-Tree -Nodes $roots
+    foreach ($u in $updates) {
+        $shown = (@($u.Changed.Keys | Sort-Object) |
+                  ForEach-Object { "$_=$(Format-FieldValue $u.Changed[$_])" }) -join ', '
+        Write-Host ("  ~ {0} -> {1}" -f $u.Node.Name, $shown)
+    }
     foreach ($fix in $pendingFixes) {
         Write-Host ("  ~ {0} -> {1}" -f $fix.task_id, $fix.status)
     }
@@ -317,6 +359,11 @@ function Invoke-Apply {
         Write-Host ("updated  {0} -> {1}" -f $fix.task_id, $fix.status)
     }
 
+    foreach ($u in $updates) {
+        [void](Set-ClickUpTask -TaskId $u.Node.ExistingId -Fields $u.Changed)
+        Write-Host ("updated  {0}  {1}" -f $u.Node.ExistingId, $u.Node.Name)
+    }
+
     # Parents first: a child needs its parent's id, which may not exist until
     # this run creates it. Get-NodeList is depth-first, so order is guaranteed.
     foreach ($node in $nodes) {
@@ -333,8 +380,8 @@ function Invoke-Apply {
         Write-Host ("created  {0}  {1}" -f $created.id, $node.Name)
     }
 
-    Write-Host ("`nDone. {0} created, {1} API calls." -f $missing.Count,
-                (Get-ClickUpCallCount))
+    Write-Host ("`nDone. {0} created, {1} updated, {2} API calls." -f
+                $missing.Count, @($updates).Count, (Get-ClickUpCallCount))
     return 0
 }
 

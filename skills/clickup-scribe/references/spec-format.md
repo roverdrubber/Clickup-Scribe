@@ -48,12 +48,27 @@ declarative: re-running against the same spec converges on the same board.
 | `priority` | task, optional | `urgent`, `high`, `normal`, `low`, or 1-4. |
 | `due_date` | task, optional | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. Date alone becomes an all-day due date. |
 | `start_date` | task, optional | Same formats as `due_date`. |
-| `time_estimate` | task, optional | Minutes, as a number. |
+| `time_estimate` | task, optional | Minutes, as a number. Converted to the milliseconds the API wants. |
 | `tags` | task, optional | Array of tag names. They must already exist in the space. |
 
 `children` and `parent` are the two ways to place a task. `children` nests
 inside this spec; `parent` points at something already on the board. A task may
 use either, not both.
+
+## Convergence
+
+By default `apply` only creates what is missing. With `--reconcile` it also
+updates existing tasks whose **declared** fields have drifted:
+
+- Compared: `status`, `priority`, `due_date`, `start_date`, `time_estimate`,
+  `tags`.
+- Never compared: `description` (the write and read fields differ, so equality
+  is unreliable), `assignees` (updates use add/remove, not replacement), and
+  anything the spec does not mention.
+
+That last point is the important one. A spec that says nothing about priority
+leaves priority alone, so a spec can own a few fields and let people manage the
+rest in the UI.
 
 ## Names are the idempotency key
 

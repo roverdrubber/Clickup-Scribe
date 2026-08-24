@@ -70,13 +70,23 @@ class ClickUp(_real.ClickUp):
         for row in rows:
             if row["id"] in state["deleted"]:
                 continue
-            status = overrides.get(row["id"], {}).get("status") or row["status"]
-            out.append({
+            update = overrides.get(row["id"], {})
+            body = row.get("body", {})
+            status = update.get("status") or body.get("status") or row["status"]
+            entry = {
                 "id": row["id"], "name": row["name"], "parent": row.get("parent"),
                 "status": {"status": status},
                 "assignees": [{"username": u} for u in row.get("assignees", [])],
                 "description": row.get("description", ""),
-            })
+            }
+            # Later writes win, so a reconciled field reads back reconciled.
+            for key in ("priority", "due_date", "time_estimate", "start_date"):
+                value = update.get(key, body.get(key, row.get(key)))
+                entry[key] = {"priority": str(value)} if (
+                    key == "priority" and value is not None) else value
+            tags = update.get("tags", body.get("tags", row.get("tags", [])))
+            entry["tags"] = [{"name": t} for t in (tags or [])]
+            out.append(entry)
         return out
 
     def get_list(self, list_id):

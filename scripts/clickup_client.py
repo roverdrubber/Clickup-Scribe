@@ -304,7 +304,9 @@ class ClickUp:
         if (start := parse_date(start_date)) is not None:
             body["start_date"], body["start_date_time"] = start
         if time_estimate:
-            body["time_estimate"] = int(time_estimate)
+            # The API counts milliseconds; the CLI and specs take minutes,
+            # which is what a person means and what the MCP also accepts.
+            body["time_estimate"] = int(time_estimate) * 60_000
         if tags:
             body["tags"] = list(tags)
         return body
@@ -312,6 +314,55 @@ class ClickUp:
     def delete_task(self, task_id: str) -> dict:
         """Move a task to the workspace trash. Recoverable there for 30 days."""
         return self._call("DELETE", f"/task/{task_id}")
+
+    @staticmethod
+    def drift(current: dict, wanted: dict) -> dict:
+        """Fields in `wanted` that the live task does not already match.
+
+        Only what the spec declares is compared, so a field the spec is silent
+        about is never touched - a priority set by hand in the UI survives a
+        spec that says nothing about priority.
+
+        `description` is deliberately not reconciled. We send `markdown_content`
+        and ClickUp returns a normalised `description`, so equality is not
+        reliable and every run would re-send the same text.
+        """
+        changed: dict = {}
+
+        def current_priority():
+            raw = current.get("priority")
+            if isinstance(raw, dict):
+                raw = raw.get("priority")
+            return int(raw) if raw not in (None, "") else None
+
+        def current_int(key):
+            raw = current.get(key)
+            return int(raw) if raw not in (None, "") else None
+
+        for key, value in wanted.items():
+            if key in ("name", "markdown_content", "parent", "assignees",
+                       "due_date_time", "start_date_time"):
+                continue
+            if key == "status":
+                if (current.get("status") or {}).get("status") != value:
+                    changed["status"] = value
+            elif key == "priority":
+                if current_priority() != value:
+                    changed["priority"] = value
+            elif key in ("due_date", "start_date", "time_estimate"):
+                if current_int(key) != value:
+                    changed[key] = value
+                    flag = f"{key}_time"
+                    if flag in wanted:
+                        changed[flag] = wanted[flag]
+            elif key == "tags":
+                live = sorted(
+                    t.get("name", t) if isinstance(t, dict) else t
+                    for t in (current.get("tags") or [])
+                )
+                if live != sorted(value):
+                    changed["tags"] = value
+        return changed
 
     # -- structure --------------------------------------------------------
     #

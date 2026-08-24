@@ -65,7 +65,11 @@
         "assignees": [
           "jgb"
         ],
-        "description": "Cutoffs and payslips."
+        "description": "Cutoffs and payslips.",
+        "priority": null,
+        "due_date": null,
+        "tags": [],
+        "time_estimate": null
       },
       {
         "id": "t2",
@@ -73,7 +77,11 @@
         "parent": "t1",
         "status": "completed",
         "assignees": [],
-        "description": "Server-computed money fields."
+        "description": "Server-computed money fields.",
+        "priority": null,
+        "due_date": null,
+        "tags": [],
+        "time_estimate": null
       },
       {
         "id": "t3",
@@ -83,7 +91,13 @@
         "assignees": [
           "jgb"
         ],
-        "description": ""
+        "description": "",
+        "priority": 3,
+        "due_date": null,
+        "tags": [
+          "stale"
+        ],
+        "time_estimate": null
       },
       {
         "id": "t4",
@@ -91,7 +105,11 @@
         "parent": "gone",
         "status": "completed",
         "assignees": [],
-        "description": "Parent is not on this list."
+        "description": "Parent is not on this list.",
+        "priority": null,
+        "due_date": null,
+        "tags": [],
+        "time_estimate": null
       },
       {
         "id": "t5",
@@ -99,7 +117,11 @@
         "parent": null,
         "status": "in review",
         "assignees": [],
-        "description": ""
+        "description": "",
+        "priority": null,
+        "due_date": null,
+        "tags": [],
+        "time_estimate": null
       }
     ],
     "901603319733": []

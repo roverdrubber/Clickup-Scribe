@@ -84,12 +84,41 @@ function Get-ClickUpTasks {
         foreach ($a in @(Get-Member2 $row 'assignees' @())) {
             $assignees += ,([pscustomobject]@{ username = $a })
         }
+        $update = $null
+        foreach ($u in @(Get-Member2 $state 'updated' @())) {
+            if ($u.id -eq $row.id) { $update = $u }
+        }
+        $body = Get-Member2 $row 'body'
+
+        function Pick($key) {
+            $v = Get-Member2 $update $key
+            if ($null -ne $v) { return $v }
+            $v = Get-Member2 $body $key
+            if ($null -ne $v) { return $v }
+            return (Get-Member2 $row $key)
+        }
+
+        $prio = Pick 'priority'
+        $prioValue = $null
+        if ($null -ne $prio) { $prioValue = [pscustomobject]@{ priority = "$prio" } }
+        $tagNames = @(Pick 'tags')
+        $tagObjects = @()
+        foreach ($t in $tagNames) {
+            if ($t -is [string]) { $tagObjects += ,([pscustomobject]@{ name = $t }) }
+            else { $tagObjects += ,$t }
+        }
+
         $out += ,([pscustomobject]@{
             id = $row.id; name = $row.name
             parent = (Get-Member2 $row 'parent')
             status = [pscustomobject]@{ status = $status }
             assignees = $assignees
             description = (Get-Member2 $row 'description' '')
+            priority = $prioValue
+            due_date = (Pick 'due_date')
+            start_date = (Pick 'start_date')
+            time_estimate = (Pick 'time_estimate')
+            tags = $tagObjects
         })
     }
     return $out

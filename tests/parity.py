@@ -48,6 +48,7 @@ os.environ["PARITY_REAL_MODULE"] = str(SCRIPTS / "ClickUp.psm1")
 
 def scenarios() -> list[dict]:
     spec = str(FIXTURES / "spec.json")
+    recon = str(FIXTURES / "reconcile.json")
     return [
         {"name": "tree", "tool": "reader",
          "steps": [(["tree"], ["tree"])]},
@@ -186,6 +187,21 @@ def scenarios() -> list[dict]:
                      "--dry-run"],
                     ["add-folder", "-Space", "90161372882", "-Name", "Ghost",
                      "-DryRun"])]},
+
+        {"name": "reconcile: off by default, drift left alone", "tool": "scribe",
+         "steps": [(["apply", recon], ["apply", recon])]},
+
+        {"name": "reconcile: shows drift in the dry run", "tool": "scribe",
+         "steps": [(["apply", recon, "--reconcile"],
+                    ["apply", recon, "-Reconcile"])]},
+
+        {"name": "reconcile: applies, then converges to a no-op", "tool": "scribe",
+         "steps": [
+             (["apply", recon, "--apply", "--reconcile"],
+              ["apply", recon, "-Apply", "-Reconcile"]),
+             (["apply", recon, "--apply", "--reconcile"],
+              ["apply", recon, "-Apply", "-Reconcile"]),
+         ]},
 
         {"name": "apply: create, then converged no-op", "tool": "scribe",
          "steps": [

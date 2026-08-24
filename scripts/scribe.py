@@ -78,6 +78,13 @@ def load_spec(path: Path) -> tuple[str, list[dict], list[Node]]:
     return str(spec["list_id"]), spec.get("status_fixes", []), roots
 
 
+def show_value(value) -> str:
+    """Render a value the same way both runtimes do."""
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value)
+    return str(value)
+
+
 def render(roots: list[Node], indent: int = 0) -> None:
     for node in roots:
         mark = "=" if node.existing_id else "+"
@@ -86,14 +93,20 @@ def render(roots: list[Node], indent: int = 0) -> None:
         render(node.children, indent + 2)
 
 
-def read_board(api: ClickUp, list_id: str) -> tuple[dict[str, str], dict[str, str]]:
-    """(name -> id, id -> status) for the whole list. One paged read."""
+def read_board(api: ClickUp, list_id: str):
+    """(name -> id, id -> status, id -> full task) for a list. One paged read.
+
+    The full rows are kept because reconciliation compares against fields the
+    name/status pair does not carry.
+    """
     names: dict[str, str] = {}
     statuses: dict[str, str] = {}
+    by_id: dict[str, dict] = {}
     for task in api.list_tasks(list_id):
         names.setdefault(task["name"], task["id"])
         statuses[task["id"]] = task["status"]["status"]
-    return names, statuses
+        by_id[task["id"]] = task
+    return names, statuses, by_id
 
 
 def check_status(api: ClickUp, list_id: str, wanted: set[str]) -> bool:
@@ -120,7 +133,7 @@ def cmd_add(api: ClickUp, args) -> int:
 
     existing_id = None
     if not args.allow_duplicate:
-        names, _ = read_board(api, args.list)
+        names, _, _ = read_board(api, args.list)
         existing_id = names.get(args.name)
 
     if existing_id:
@@ -180,7 +193,7 @@ def cmd_set(api: ClickUp, args) -> int:
     if args.list and not check_status(api, args.list, {args.status}):
         return 1
 
-    shown = ", ".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    shown = ", ".join(f"{k}={show_value(v)}" for k, v in sorted(fields.items()))
     print(f"  ~ {args.task_id} -> {shown}")
     if args.dry_run:
         print("\nDry run. Drop --dry-run to write.")
@@ -263,11 +276,11 @@ def cmd_apply(api: ClickUp, args) -> int:
     list_id, status_fixes, roots = load_spec(args.spec)
     nodes = [node for root in roots for node in root.walk()]
 
-    wanted = {n.status for n in nodes} | {f["status"] for f in status_fixes}
-    if not check_status(api, list_id, wanted):
+    wanted_statuses = {n.status for n in nodes} | {f["status"] for f in status_fixes}
+    if not check_status(api, list_id, wanted_statuses):
         return 1
 
-    names, statuses = read_board(api, list_id)
+    names, statuses, by_id = read_board(api, list_id)
     for node in nodes:
         node.existing_id = names.get(node.name)
 
@@ -277,10 +290,29 @@ def cmd_apply(api: ClickUp, args) -> int:
         if statuses.get(fix["task_id"]) != fix["status"]
     ]
 
+    # Convergence: an existing task whose declared fields no longer match.
+    updates: list[tuple[Node, dict]] = []
+    if args.reconcile:
+        for node in nodes:
+            if not node.existing_id:
+                continue
+            wanted = api.task_body(
+                status=node.status or None, priority=node.priority,
+                due_date=node.due_date, start_date=node.start_date,
+                time_estimate=node.time_estimate, tags=node.tags,
+            )
+            changed = api.drift(by_id[node.existing_id], wanted)
+            if changed:
+                updates.append((node, changed))
+
     missing = [n for n in nodes if not n.existing_id]
     print(f"list {list_id}: {len(names)} tasks present")
-    print(f"spec: {len(nodes)} entries, {len(missing)} to create\n")
+    print(f"spec: {len(nodes)} entries, {len(missing)} to create, "
+          f"{len(updates)} to update\n")
     render(roots)
+    for node, changed in updates:
+        shown = ", ".join(f"{k}={show_value(v)}" for k, v in sorted(changed.items()))
+        print(f"  ~ {node.name} -> {shown}")
     for fix in pending_fixes:
         print(f"  ~ {fix['task_id']} -> {fix['status']}")
     if skipped := len(status_fixes) - len(pending_fixes):
@@ -294,6 +326,10 @@ def cmd_apply(api: ClickUp, args) -> int:
     for fix in pending_fixes:
         api.update_task(fix["task_id"], status=fix["status"])
         print(f"updated  {fix['task_id']} -> {fix['status']}")
+
+    for node, changed in updates:
+        api.update_task(node.existing_id, **changed)
+        print(f"updated  {node.existing_id}  {node.name}")
 
     # Parents first: a child needs its parent's id, which may not exist until
     # this run creates it.
@@ -316,7 +352,8 @@ def cmd_apply(api: ClickUp, args) -> int:
         node.created_id = created["id"]
         print(f"created  {created['id']}  {node.name}")
 
-    print(f"\nDone. {len(missing)} created, {api.calls} API calls.")
+    print(f"\nDone. {len(missing)} created, {len(updates)} updated, "
+          f"{api.calls} API calls.")
     return 0
 
 
@@ -381,6 +418,9 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("spec", type=Path)
     apply.add_argument("--apply", action="store_true",
                        help="write; without it this is a dry run")
+    apply.add_argument("--reconcile", action="store_true",
+                       help="also update existing tasks whose declared fields "
+                            "have drifted from the spec")
     apply.set_defaults(func=cmd_apply)
 
     delete = sub.add_parser("delete", help="remove one task")
