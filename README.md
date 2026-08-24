@@ -79,18 +79,29 @@ them and lose only the `/clickup-scribe:setup` alias, which is a pointer to the
 ## Requirements
 
 None to install. Two implementations ship side by side, and every host already
-has one of them:
+has one of them.
 
-| Host | Runtime | Preinstalled |
-|---|---|---|
-| Linux | `python3` | yes |
-| macOS | `python3` | yes |
-| Windows | Windows PowerShell 5.1 | yes, part of the OS |
+**Python is the default.** Linux and macOS ship `python3`, and most Windows
+development machines have it too, so `scribe.py` and `reader.py` are the ones
+to reach for.
 
-Windows has no Python, and typing `python` there opens the Microsoft Store
-rather than erroring - which is why the PowerShell port exists. It targets
-5.1 specifically, so PowerShell 7 is not required. Neither implementation uses
-a third-party package: standard library and built-in cmdlets only.
+**PowerShell is the fallback**, for a Windows host with no Python. Windows
+Subsystem aside, Windows ships none by default, and typing `python` there
+usually finds the Microsoft Store stub - a command that resolves and then
+refuses to run rather than erroring like a missing one. So detect it by running
+it, not by whether the name exists:
+
+```
+python3 --version || python --version || py -3 --version
+```
+
+The first that prints a version and exits 0 is your runtime. If none does and
+the host is Windows, use the `.ps1` half: Windows PowerShell 5.1 is part of the
+OS, so the fallback needs no install and no PowerShell 7. If none does
+anywhere else, there is no runtime - see [no runtime at all](#no-runtime-at-all).
+
+Neither implementation uses a third-party package: standard library and
+built-in cmdlets only.
 
 ## Setup
 

@@ -39,6 +39,10 @@ Token setup is one-time and shared with the other skills - see the
 `python3 scripts/setup.py store` in their own terminal, and every command picks
 the token up from there. `CLICKUP_TOKEN` in the environment overrides it.
 
+**Default to `reader.py`.** `reader.ps1` is the fallback for a Windows host
+with no Python; the `clickup-scribe` skill's *Pick the runtime* section has the
+probe and the rule.
+
 | Goal | Python | PowerShell |
 |---|---|---|
 | Whole structure | `reader.py tree` | `.\reader.ps1 tree` |

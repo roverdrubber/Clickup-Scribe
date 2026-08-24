@@ -36,18 +36,35 @@ hand.
 
 ## Pick the runtime
 
-Two implementations, same behaviour, same spec files. Choose by what the host
-already has - **neither needs anything installed**.
+Two implementations, same behaviour, same spec files, neither needing anything
+installed. **Default to `scribe.py`.** Fall back to `scribe.ps1` only where
+Python is genuinely absent, which in practice means a Windows host without it.
 
-| Host | Use | Why |
-|---|---|---|
-| Linux, macOS | `scribe.py` | `python3` is preinstalled on both |
-| Windows | `scribe.ps1` | Windows ships no Python, and bare `python` opens the Microsoft Store instead of erroring. PowerShell 5.1 is part of the OS |
+Probe once, at the point you first need to run something, and reuse the answer
+for the rest of the session:
 
-`scribe.ps1` targets Windows PowerShell 5.1, so it needs no PowerShell 7
-install and no modules. On Windows it also forces TLS 1.2, which 5.1 does not
-negotiate by default and without which the first call fails looking like a
-network fault.
+```bash
+python3 --version || python --version || py -3 --version
+```
+
+Use the first that **prints a version and exits 0**. Resolving as a command is
+not enough: on Windows a bare `python` is usually the Microsoft Store stub,
+which sits on PATH and then refuses to run rather than erroring like a missing
+command. Treat a non-zero exit, or no version string, as absent.
+
+| Probe | Use |
+|---|---|
+| A Python that runs | `scribe.py` |
+| None, and the host is Windows | `scribe.ps1` |
+| None, and the host is not Windows | No runtime - see `references/curl-recipes.md` |
+
+Do not probe on a host you already know: Linux and macOS ship `python3`, so go
+straight to `scribe.py` there and spend the probe only on Windows.
+
+`scribe.ps1` targets Windows PowerShell 5.1, so the fallback needs no
+PowerShell 7 install and no modules - 5.1 is part of the OS. On Windows it also
+forces TLS 1.2, which 5.1 does not negotiate by default and without which the
+first call fails looking like a network fault.
 
 ## Commands
 

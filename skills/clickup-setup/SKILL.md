@@ -11,7 +11,9 @@ file, and from nowhere else. No command takes it as an argument.
 
 ## 1. Report the current state
 
-Run the check for whichever runtime the host has:
+Run the check with Python, which is the default everywhere. Use the PowerShell
+line only on a Windows host where `python3 --version`, `python --version`, and
+`py -3 --version` all fail to print a version:
 
 ```bash
 python3 scripts/setup.py show

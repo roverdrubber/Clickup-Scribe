@@ -16,9 +16,12 @@ Plus `/clickup-scribe:setup`, a slash-command alias for the setup skill.
 ## Before you start
 
 - **Claude Code**, any build with plugin support (`/plugin` opens the manager).
-- **A runtime**, already present on every supported host: `python3` on Linux
-  and macOS, Windows PowerShell 5.1 on Windows. Neither implementation needs a
-  third-party package.
+- **A runtime.** Python is the default - `python3` ships on Linux and macOS,
+  and most Windows machines have it. PowerShell is the fallback for a Windows
+  host without Python; 5.1 is part of the OS, so it needs no install. Detect
+  Python by running it, not by whether the name resolves:
+  `python3 --version || python --version || py -3 --version`. Neither
+  implementation needs a third-party package.
 - **A ClickUp personal token**, from ClickUp > Settings > Apps > API Token.
   Get one now; you will store it in step 3.
 
@@ -177,7 +180,7 @@ python3 tests/parity.py      # both runtimes, diffed - 35 scenarios
 | `No ClickUp token configured` | Not stored yet. The error prints the exact absolute command; use that line rather than rebuilding the path |
 | `${CLAUDE_PLUGIN_ROOT}` is empty in your terminal | It is set only inside a session. Ask Claude to print the resolved path |
 | `401` from any command | Token wrong or revoked. `setup.py clear`, then `setup.py store` |
-| `python` opens the Microsoft Store | Windows ships no Python. Use the `.ps1` half - it needs nothing installed |
+| `python` opens the Microsoft Store | That is the Store stub, not a Python. Windows ships none by default; use the `.ps1` half, which needs nothing installed |
 | First call fails like a network fault on Windows | PowerShell 5.1 does not negotiate TLS 1.2 by default. `ClickUp.psm1` forces it; make sure you are running the shipped module |
 
 ## What is Claude-specific here

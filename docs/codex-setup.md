@@ -15,9 +15,12 @@ put them so Codex finds them, and so they can find their scripts.
 
 - **Codex CLI** with skills support. `/skills` in a session lists what it can
   see; if that command does not exist, your build predates skills.
-- **A runtime**, already present on every supported host: `python3` on Linux
-  and macOS, Windows PowerShell 5.1 on Windows. Neither implementation needs a
-  third-party package.
+- **A runtime.** Python is the default - `python3` ships on Linux and macOS,
+  and most Windows machines have it. PowerShell is the fallback for a Windows
+  host without Python; 5.1 is part of the OS, so it needs no install. Detect
+  Python by running it, not by whether the name resolves:
+  `python3 --version || python --version || py -3 --version`. Neither
+  implementation needs a third-party package.
 - **A ClickUp personal token**, from ClickUp > Settings > Apps > API Token.
   Get one now; you will store it in step 4.
 
@@ -185,7 +188,7 @@ ClickUp work in plain language usually pulls the right one in without the `$`.
 | `ModuleNotFoundError: clickup_client` | A script was copied out of `scripts/` on its own. `clickup_client.py` (or `ClickUp.psm1`) has to sit beside it |
 | `No ClickUp token configured` | Not stored yet. The error prints the exact absolute command to run; use that line rather than rebuilding the path |
 | `401` from any command | Token wrong or revoked. `setup.py clear`, then `setup.py store` |
-| `python` opens the Microsoft Store | Windows ships no Python. Use the `.ps1` half - it needs nothing installed |
+| `python` opens the Microsoft Store | That is the Store stub, not a Python. Windows ships none by default; use the `.ps1` half, which needs nothing installed |
 | First call fails like a network fault on Windows | PowerShell 5.1 does not negotiate TLS 1.2 by default. `ClickUp.psm1` forces it; make sure you are running the shipped module, not a copy |
 
 ## What Codex ignores

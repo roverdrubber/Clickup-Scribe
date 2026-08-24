@@ -1,8 +1,9 @@
 # clickup-scribe
 
 Read and write ClickUp boards over the REST API, so bulk work does not burn the
-ClickUp MCP server's small daily quota. Two runtimes, same behaviour: Python
-for Linux and macOS, PowerShell 5.1 for Windows. No third-party packages.
+ClickUp MCP server's small daily quota. Two runtimes, same behaviour: Python is
+the default everywhere, PowerShell 5.1 the fallback for a Windows host with no
+Python. No third-party packages.
 
 This file orients an agent working *in* this repository. To use the tool
 against a board, load the skills instead.
