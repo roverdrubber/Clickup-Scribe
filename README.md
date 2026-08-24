@@ -1,7 +1,8 @@
 # clickup-scribe
 
-A Claude Code plugin for writing to a ClickUp board — one task or a whole tree —
-without spending the ClickUp MCP server's daily quota.
+An agent plugin for writing to a ClickUp board — one task or a whole tree —
+without spending the ClickUp MCP server's daily quota. Ships as a Claude Code
+plugin and as three plain skills any agent that reads `SKILL.md` can load.
 
 ## The problem
 
@@ -23,6 +24,17 @@ interactive calls it is sized for.
 
 ## Install
 
+Full instructions per harness:
+
+| Harness | Guide |
+|---|---|
+| Claude Code | [`docs/claude-code-setup.md`](docs/claude-code-setup.md) |
+| Codex | [`docs/codex-setup.md`](docs/codex-setup.md) |
+
+### Claude Code
+
+Install it as a plugin; the layout takes care of itself.
+
 ```bash
 /plugin marketplace add /path/to/clickup-scribe    # wherever you cloned it
 /plugin install clickup-scribe@clickup-scribe-marketplace
@@ -30,6 +42,39 @@ interactive calls it is sized for.
 
 Nothing in the plugin depends on that location: scripts resolve their own
 paths, so it works from a clone, a marketplace install, or anywhere else.
+Restart the session for the skills to load.
+
+### Codex
+
+Clone the repo, then link the three skill folders into a skills root and
+`scripts/` one level above it.
+
+```bash
+SRC=~/src/clickup-scribe
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+
+mkdir -p "$CODEX_HOME/skills"
+for s in clickup-scribe clickup-read clickup-setup; do
+  ln -s "$SRC/skills/$s" "$CODEX_HOME/skills/$s"
+done
+ln -s "$SRC/scripts" "$CODEX_HOME/scripts"
+```
+
+### Any other agent
+
+The three skills under `skills/` are plain `SKILL.md` files - YAML frontmatter
+with `name` and `description`, a markdown body, `references/` alongside - so
+any harness that loads skills in that shape reads them unmodified.
+
+**One layout rule, wherever they go: `scripts/` must be a sibling of the
+directory holding the skill folders.** All three share one copy of the client
+and reach it at `../../scripts/`, so from `<root>/skills/<skill>/` it resolves
+to `<root>/scripts/`. Clone the repo whole; a skill folder lifted out on its
+own will load and have no tool to run.
+
+`.claude-plugin/` and `commands/` are Claude Code's; other harnesses ignore
+them and lose only the `/clickup-scribe:setup` alias, which is a pointer to the
+`clickup-setup` skill everything else can load directly.
 
 ## Requirements
 
@@ -47,16 +92,50 @@ rather than erroring - which is why the PowerShell port exists. It targets
 5.1 specifically, so PowerShell 7 is not required. Neither implementation uses
 a third-party package: standard library and built-in cmdlets only.
 
-## Use
+## Setup
 
-Get a token from ClickUp > Settings > Apps > API Token.
+Get a token from ClickUp > Settings > Apps > API Token. It starts with `pk_`,
+carries your full permissions, and does not expire - so it is a password, not a
+config value.
+
+Store it once, in your own terminal:
 
 ```bash
-export CLICKUP_TOKEN=pk_xxxxxxxx
+python3 scripts/setup.py store
+```
+```powershell
+.\scripts\setup.ps1 store
+```
+
+The prompt does not echo and the token is never printed back, so it stays out
+of your shell history and out of any transcript. It is verified against the API
+before anything is saved, then written to a user-only file:
+
+| Host | Stored at |
+|---|---|
+| Linux, macOS | `~/.config/clickup-scribe/token` |
+| Windows | `%APPDATA%\clickup-scribe\token` |
+
+Every command reads it from there afterwards, so no environment variable is
+needed. `setup.py show` reports where the token is coming from without ever
+printing it, and `setup.py clear` removes it. In a Claude Code session,
+`/clickup-scribe:setup` walks the same ground.
+
+`CLICKUP_TOKEN` in the environment overrides the stored file, which is what
+makes a one-off or a CI run possible without disturbing it:
+
+```bash
+CLICKUP_TOKEN=pk_xxxxxxxx python3 scripts/scribe.py show --list 901615936216
+```
+
+## Use
+
+The examples below shorten the script path:
+
+```bash
 SCRIBE=scripts/scribe.py
 ```
 ```powershell
-$env:CLICKUP_TOKEN = 'pk_xxxxxxxx'
 $SCRIBE = 'scripts\scribe.ps1'
 ```
 
@@ -75,6 +154,23 @@ python3 $SCRIBE add --list 901615936216 --name "Payroll Export" \
 
 Checks the name against the list first, so running it twice does not create two
 tasks. `--dry-run` previews; `--allow-duplicate` skips the check.
+
+Every later example is written for Python alone. The PowerShell form is
+mechanical: both implementations take the same commands and the same arguments,
+spelled to each host's convention.
+
+| | Python | PowerShell |
+|---|---|---|
+| Invocation | `python3 scripts/scribe.py` | `.\scripts\scribe.ps1` |
+| Flags | `--dry-run`, `--allow-duplicate` | `-DryRun`, `-AllowDuplicate` |
+| Repeated values | `--tag a --tag b` | `-Tag a,b` |
+| Line continuation | `\` | `` ` `` |
+
+So `apply spec.json --apply` is `apply spec.json -Apply`, and
+`export --list 901615936216 --as-spec` is `export -List 901615936216 -AsSpec`.
+Every command in `scribe.ps1` and `reader.ps1` matches its Python twin; the
+[`clickup-read`](skills/clickup-read/SKILL.md) skill lists both columns
+side by side, and `tests/parity.py` proves they stay that way.
 
 ### Update one task
 
@@ -157,10 +253,11 @@ keep on scripted, repeated, or bulk writes, and when the quota is gone.
 ## Contents
 
 ```
-.claude-plugin/          plugin and marketplace manifests
-commands/
-  setup.md               /clickup-scribe:setup
-scripts/
+AGENTS.md                orientation for an agent working in this repo
+docs/
+  claude-code-setup.md   installing and configuring under Claude Code
+  codex-setup.md         installing and configuring under Codex
+scripts/                 the tool - harness-agnostic, stdlib only
   clickup_client.py      REST client, Python standard library only
   ClickUp.psm1           REST client, PowerShell 5.1+
   setup.py / .ps1        store / show / clear the API token
@@ -174,6 +271,10 @@ skills/
       rest-endpoints.md  endpoints, auth, rate limits
       curl-recipes.md    raw curl, for hosts with no runtime
   clickup-read/          reading: hierarchy, tasks, search, export
+  clickup-setup/         the one-time API token walkthrough
+.claude-plugin/          Claude Code manifests
+commands/
+  setup.md               /clickup-scribe:setup, a pointer to clickup-setup
 tests/
   parity.py              runs both implementations, diffs the output
   mocks/                 twin fake clients, one per runtime
@@ -181,6 +282,10 @@ tests/
 examples/
   hris-api-list.json     worked example
 ```
+
+`scripts/` is shared by all three skills rather than copied into each: two
+copies of the client would drift, which is what `tests/parity.py` exists to
+catch.
 
 ## Reading
 
@@ -215,7 +320,7 @@ against the same fixture and diffs stdout and exit codes, so a fix that lands
 in one and not the other fails loudly:
 
 ```bash
-python3 tests/parity.py       # 15 scenarios
+python3 tests/parity.py       # 35 scenarios
 python3 tests/parity.py -v    # show both outputs on failure
 ```
 
@@ -224,8 +329,10 @@ false parity when neither is present.
 
 ## Token handling
 
-The token is read from `CLICKUP_TOKEN` and nowhere else. Do not put it in a
-spec file, commit it, or paste it into a chat transcript. `.gitignore` excludes
+The token comes from `CLICKUP_TOKEN` if that is set, otherwise from the file
+`setup.py store` writes, and nowhere else. No command takes it as an argument,
+so it cannot land in a shell history or a process list. Do not put it in a spec
+file, commit it, or paste it into a chat transcript. `.gitignore` excludes
 `.env` and `/specs/`.
 
 ## License

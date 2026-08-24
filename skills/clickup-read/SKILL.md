@@ -34,8 +34,8 @@ Also use it when the output feeds something else: a diff, a report, a spec.
 
 ## Commands
 
-Token setup is one-time and shared with the `clickup-scribe` skill - see its
-SKILL.md, or run `/clickup-scribe:setup`. In short: the user runs
+Token setup is one-time and shared with the other skills - see the
+`clickup-setup` skill for the full walkthrough. In short: the user runs
 `python3 scripts/setup.py store` in their own terminal, and every command picks
 the token up from there. `CLICKUP_TOKEN` in the environment overrides it.
 
@@ -97,5 +97,5 @@ or a note rather than re-walking the hierarchy to find it again.
 - `../clickup-scribe/references/curl-recipes.md` - raw curl for a single read
   when there is no runtime available
 - `../clickup-scribe/references/spec-format.md` - what `--as-spec` produces
-- `${CLAUDE_PLUGIN_ROOT}/scripts/reader.py`, `reader.ps1` - the commands
-- `${CLAUDE_PLUGIN_ROOT}/scripts/clickup_client.py`, `ClickUp.psm1` - clients
+- `../../scripts/reader.py`, `reader.ps1` - the commands
+- `../../scripts/clickup_client.py`, `ClickUp.psm1` - clients
