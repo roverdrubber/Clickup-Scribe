@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "clickup-scribe: write to a ClickUp board over REST, one task or a whole tree, without spending the MCP daily quota",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "clickup-scribe",
       "source": "./",
       "description": "Read and write ClickUp boards over REST without spending the MCP server's daily quota. Two skills: clickup-scribe (write) and clickup-read (traverse, search, export).",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "John Gabriel Bagacina"
       }
