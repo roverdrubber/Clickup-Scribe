@@ -155,11 +155,15 @@ keep on scripted, repeated, or bulk writes, and when the quota is gone.
 
 ```
 .claude-plugin/          plugin and marketplace manifests
+commands/
+  setup.md               /clickup-scribe:setup
 scripts/
   clickup_client.py      REST client, Python standard library only
   ClickUp.psm1           REST client, PowerShell 5.1+
-  scribe.py / .ps1       add / set / apply / show / statuses
-  reader.py / .ps1       tree / tasks / get / find / export
+  setup.py / .ps1        store / show / clear the API token
+  scribe.py / .ps1       add / set / apply / delete / add-folder / add-list /
+                         show / statuses
+  reader.py / .ps1       tree / tasks / get / find / members / export
 skills/
   clickup-scribe/        writing: when REST vs MCP, commands, pitfalls
     references/

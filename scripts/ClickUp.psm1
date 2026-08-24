@@ -199,15 +199,64 @@ function Get-ClickUpCallCount {
 }
 
 
-function Get-ClickUpToken {
+function Get-ClickUpTokenPath {
+    <#
+    .SYNOPSIS
+        Where a stored token lives, per platform.
+    .DESCRIPTION
+        CLICKUP_SCRIBE_HOME overrides it, which is what the tests use and what
+        lets one machine hold tokens for two workspaces.
+    #>
     [OutputType([string])]
     param()
-    $token = $env:CLICKUP_TOKEN
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        throw ('CLICKUP_TOKEN is not set. Get one from ClickUp > Settings > ' +
-               'Apps > API Token, then: $env:CLICKUP_TOKEN = ''pk_...''')
+    if ($env:CLICKUP_SCRIBE_HOME) {
+        return (Join-Path $env:CLICKUP_SCRIBE_HOME 'token')
     }
-    return $token
+    if ($env:APPDATA) {
+        return (Join-Path (Join-Path $env:APPDATA 'clickup-scribe') 'token')
+    }
+    $base = $env:XDG_CONFIG_HOME
+    if (-not $base) { $base = Join-Path $HOME '.config' }
+    return (Join-Path (Join-Path $base 'clickup-scribe') 'token')
+}
+
+
+function Get-ClickUpTokenSource {
+    <#.SYNOPSIS Where the token comes from. Never returns the token itself.#>
+    [OutputType([string])]
+    param()
+    if (-not [string]::IsNullOrWhiteSpace($env:CLICKUP_TOKEN)) {
+        return 'environment (CLICKUP_TOKEN)'
+    }
+    $path = Get-ClickUpTokenPath
+    if (Test-Path $path) {
+        $stored = (Get-Content $path -Raw -ErrorAction SilentlyContinue)
+        if (-not [string]::IsNullOrWhiteSpace($stored)) { return "file ($path)" }
+    }
+    return 'not configured'
+}
+
+
+function Get-ClickUpToken {
+    <#
+    .SYNOPSIS
+        The token, from the environment first and the stored file second.
+    .DESCRIPTION
+        Environment wins so a one-off or a CI run can override what is stored
+        without disturbing it.
+    #>
+    [OutputType([string])]
+    param()
+    if (-not [string]::IsNullOrWhiteSpace($env:CLICKUP_TOKEN)) {
+        return $env:CLICKUP_TOKEN.Trim()
+    }
+    $path = Get-ClickUpTokenPath
+    if (Test-Path $path) {
+        $stored = (Get-Content $path -Raw -ErrorAction SilentlyContinue)
+        if (-not [string]::IsNullOrWhiteSpace($stored)) { return $stored.Trim() }
+    }
+    throw ('No ClickUp token configured. Run `setup.ps1 store` to be prompted ' +
+           'for one, or set $env:CLICKUP_TOKEN.')
 }
 
 
@@ -573,7 +622,8 @@ function Set-ClickUpTask {
 
 Export-ModuleMember -Function Invoke-ClickUp, Get-ClickUpTasks, Get-ClickUpList,
     Get-ClickUpStatuses, New-ClickUpTask, Set-ClickUpTask, Get-ClickUpToken,
-    Get-ClickUpCallCount, Get-ClickUpTask, Get-ClickUpTeams, Get-ClickUpSpaces,
+    Get-ClickUpCallCount, Get-ClickUpTask, Get-ClickUpTokenPath,
+    Get-ClickUpTokenSource, Get-ClickUpTeams, Get-ClickUpSpaces,
     Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists,
     Remove-ClickUpTask, Get-ClickUpMembers, Resolve-ClickUpAssignees,
     New-ClickUpTaskBody, ConvertTo-Priority, ConvertTo-EpochMs,

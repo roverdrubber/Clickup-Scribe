@@ -66,6 +66,52 @@ def parse_date(value) -> tuple[int, bool] | None:
     )
 
 
+def token_path() -> "Path":
+    """Where a stored token lives, per platform.
+
+    `CLICKUP_SCRIBE_HOME` overrides it, which is what the tests use and what
+    lets one machine hold tokens for two workspaces.
+    """
+    from pathlib import Path
+
+    if override := os.environ.get("CLICKUP_SCRIBE_HOME"):
+        return Path(override) / "token"
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming")
+        return Path(base) / "clickup-scribe" / "token"
+    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
+    return Path(base) / "clickup-scribe" / "token"
+
+
+def find_token() -> str | None:
+    """The token, from the environment first and the stored file second.
+
+    Environment wins so a one-off or a CI run can override what is stored
+    without disturbing it.
+    """
+    if value := (os.environ.get("CLICKUP_TOKEN") or "").strip():
+        return value
+    path = token_path()
+    try:
+        stored = path.read_text().strip()
+    except OSError:
+        return None
+    return stored or None
+
+
+def token_source() -> str:
+    """Where the token is coming from. Never returns the token itself."""
+    if (os.environ.get("CLICKUP_TOKEN") or "").strip():
+        return "environment (CLICKUP_TOKEN)"
+    path = token_path()
+    try:
+        if path.read_text().strip():
+            return f"file ({path})"
+    except OSError:
+        pass
+    return "not configured"
+
+
 class ClickUpError(RuntimeError):
     """An API call failed and the caller should stop."""
 
@@ -85,11 +131,11 @@ class ClickUp:
     """
 
     def __init__(self, token: str | None = None, pace: float = 0.15) -> None:
-        self.token = token or os.environ.get("CLICKUP_TOKEN") or ""
+        self.token = token or find_token() or ""
         if not self.token:
             raise ClickUpError(
-                "CLICKUP_TOKEN is not set. Get one from ClickUp > Settings > "
-                "Apps > API Token, then `export CLICKUP_TOKEN=pk_...`."
+                "No ClickUp token configured. Run `setup.py store` to be "
+                "prompted for one, or set CLICKUP_TOKEN."
             )
         self.pace = pace
         self.calls = 0

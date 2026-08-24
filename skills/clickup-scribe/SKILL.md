@@ -51,11 +51,27 @@ network fault.
 
 ## Commands
 
+**First run only.** Have the user do this in their own terminal - the prompt
+is hidden, so an agent's shell cannot type into it:
+
 ```bash
-export CLICKUP_TOKEN=pk_xxxxxxxx           # Settings > Apps > API Token
+python3 scripts/setup.py store
 ```
 ```powershell
-$env:CLICKUP_TOKEN = 'pk_xxxxxxxx'         # Windows
+.\setup.ps1 store
+```
+
+It prompts without echoing, verifies the token against the API before saving,
+and stores it owner-only in `~/.config/clickup-scribe/token` (or
+`%APPDATA%\clickup-scribe\token`). Every command reads it from there
+afterwards. `setup.py show` reports where the token comes from without printing
+it; `setup.py clear` removes it.
+
+`CLICKUP_TOKEN` in the environment still overrides the stored file, for a
+one-off or a CI run:
+
+```bash
+CLICKUP_TOKEN=pk_xxxxxxxx python3 scripts/reader.py tree
 ```
 
 **One task:**

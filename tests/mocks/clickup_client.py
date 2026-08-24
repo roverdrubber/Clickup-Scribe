@@ -33,6 +33,13 @@ _spec.loader.exec_module(_real)
 ClickUpError = _real.ClickUpError
 RateLimited = _real.RateLimited
 
+# Forward the module-level surface. Shadowing the real module means anything
+# not re-exported here vanishes for callers, which shows up as an ImportError
+# rather than as a behaviour difference.
+for _name in ("PRIORITIES", "parse_priority", "parse_date",
+              "token_path", "token_source", "find_token"):
+    globals()[_name] = getattr(_real, _name)
+
 
 def _fixture() -> dict:
     return json.loads(FIXTURE.read_text())

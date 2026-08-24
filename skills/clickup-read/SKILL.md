@@ -34,12 +34,10 @@ Also use it when the output feeds something else: a diff, a report, a spec.
 
 ## Commands
 
-```bash
-export CLICKUP_TOKEN=pk_xxxxxxxx           # Settings > Apps > API Token
-```
-```powershell
-$env:CLICKUP_TOKEN = 'pk_xxxxxxxx'         # Windows
-```
+Token setup is one-time and shared with the `clickup-scribe` skill - see its
+SKILL.md, or run `/clickup-scribe:setup`. In short: the user runs
+`python3 scripts/setup.py store` in their own terminal, and every command picks
+the token up from there. `CLICKUP_TOKEN` in the environment overrides it.
 
 | Goal | Python | PowerShell |
 |---|---|---|

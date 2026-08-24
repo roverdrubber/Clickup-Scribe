@@ -188,6 +188,12 @@ def scenarios() -> list[dict]:
                     ["add-folder", "-Space", "90161372882", "-Name", "Ghost",
                      "-DryRun"])]},
 
+        {"name": "setup: reports nothing configured", "tool": "setup",
+         "steps": [(["show"], ["show"])]},
+
+        {"name": "setup: clear with nothing stored", "tool": "setup",
+         "steps": [(["clear"], ["clear"])]},
+
         {"name": "reconcile: off by default, drift left alone", "tool": "scribe",
          "steps": [(["apply", recon], ["apply", recon])]},
 
@@ -225,24 +231,34 @@ def sandbox(kind: str) -> Path:
     path = Path(tempfile.mkdtemp(prefix=f"parity-{kind}-"))
     if kind == "py":
         shutil.copy(MOCKS / "clickup_client.py", path)
-        for script in ("scribe.py", "reader.py"):
+        for script in ("scribe.py", "reader.py", "setup.py"):
             shutil.copy(SCRIPTS / script, path)
     else:
         shutil.copy(MOCKS / "ClickUp.psm1", path)
-        for script in ("scribe.ps1", "reader.ps1"):
+        for script in ("scribe.ps1", "reader.ps1", "setup.ps1"):
             shutil.copy(SCRIPTS / script, path)
     shutil.copy(FIXTURES / "board.json", path)
     return path
 
 
-def run(cmd: list[str], cwd: Path) -> tuple[str, int]:
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=120)
+def run(cmd: list[str], cwd: Path, extra_env: dict | None = None) -> tuple[str, int]:
+    env = dict(os.environ)
+    # Each sandbox gets its own token directory, so token-source scenarios
+    # cannot see the developer's real stored token.
+    env["CLICKUP_SCRIBE_HOME"] = str(cwd / "cfg")
+    env.pop("CLICKUP_TOKEN", None)
+    env.update(extra_env or {})
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                          timeout=120, env=env)
     return (proc.stdout + proc.stderr), proc.returncode
 
 
 # Each implementation names its own flags - `--dry-run` against `-DryRun` - so
 # messages that quote them differ by design. Canonicalise rather than compare.
 FLAG = re.compile(r"(?<![\w-])--?([A-Za-z][\w-]*)")
+
+# Sandbox paths differ per runtime and per run; the shape is what matters.
+SANDBOX = re.compile(r"/tmp/parity-(py|ps)-\w+")
 
 
 def normalize(text: str) -> str:
@@ -259,6 +275,7 @@ def normalize(text: str) -> str:
             continue
         line = FLAG.sub(lambda m: "<flag:" + m.group(1).lower().replace("-", "") + ">",
                         line)
+        line = SANDBOX.sub("<sandbox>", line)
         lines.append(line)
     while lines and not lines[-1]:
         lines.pop()
