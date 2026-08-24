@@ -28,6 +28,22 @@ interactive calls it is sized for.
 /plugin install clickup-scribe@clickup-scribe-marketplace
 ```
 
+## Requirements
+
+None to install. Two implementations ship side by side, and every host already
+has one of them:
+
+| Host | Runtime | Preinstalled |
+|---|---|---|
+| Linux | `python3` | yes |
+| macOS | `python3` | yes |
+| Windows | Windows PowerShell 5.1 | yes, part of the OS |
+
+Windows has no Python, and typing `python` there opens the Microsoft Store
+rather than erroring - which is why the PowerShell port exists. It targets
+5.1 specifically, so PowerShell 7 is not required. Neither implementation uses
+a third-party package: standard library and built-in cmdlets only.
+
 ## Use
 
 Get a token from ClickUp > Settings > Apps > API Token.
@@ -36,6 +52,10 @@ Get a token from ClickUp > Settings > Apps > API Token.
 export CLICKUP_TOKEN=pk_xxxxxxxx
 SCRIBE=skills/clickup-scribe/scripts/scribe.py
 ```
+```powershell
+$env:CLICKUP_TOKEN = 'pk_xxxxxxxx'
+$SCRIBE = 'skills\clickup-scribe\scripts\scribe.ps1'
+```
 
 ### One task
 
@@ -43,6 +63,11 @@ SCRIBE=skills/clickup-scribe/scripts/scribe.py
 python3 $SCRIBE add --list 901615936216 --name "Payroll Export" \
                     --parent 86d3qqd5f --description "Export a cutoff's payroll." \
                     --status completed --assignee 88978416
+```
+```powershell
+& $SCRIBE add -List 901615936216 -Name "Payroll Export" `
+              -Parent 86d3qqd5f -Description "Export a cutoff's payroll." `
+              -Status completed -Assignee 88978416
 ```
 
 Checks the name against the list first, so running it twice does not create two
@@ -128,14 +153,17 @@ skills/clickup-scribe/
     spec-format.md       the JSON schema
     rest-endpoints.md    endpoints, auth, rate limits
   scripts/
-    clickup_client.py    standard-library REST client
+    clickup_client.py    REST client, Python standard library only
     scribe.py            add / set / apply / show / statuses
+    ClickUp.psm1         REST client, PowerShell 5.1+
+    scribe.ps1           the same five commands, for Windows
 examples/
   hris-api-list.json     worked example
 ```
 
-`clickup_client.py` has no dependencies beyond the standard library and is
-importable on its own for anything the commands do not cover.
+Both clients are dependency-free and importable on their own for anything the
+commands do not cover. The two implementations read the same spec files and
+behave identically; they are verified against the same test matrix.
 
 ## Token handling
 

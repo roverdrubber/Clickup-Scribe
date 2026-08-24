@@ -24,7 +24,7 @@ before the 53rd was refused for 23 hours.
 is a single call and needs no token. Do not reach for this skill to add one
 task to a board by hand - that is what the daily quota is sized for.
 
-**Use `scribe.py` when any of these is true:**
+**Use `scribe` when any of these is true:**
 
 - More than ~5 writes, or any loop over a collection
 - The MCP quota is exhausted and the work cannot wait
@@ -34,10 +34,28 @@ task to a board by hand - that is what the daily quota is sized for.
 Roughly: MCP for a keystroke, scribe for anything you would not want to redo by
 hand.
 
+## Pick the runtime
+
+Two implementations, same behaviour, same spec files. Choose by what the host
+already has - **neither needs anything installed**.
+
+| Host | Use | Why |
+|---|---|---|
+| Linux, macOS | `scribe.py` | `python3` is preinstalled on both |
+| Windows | `scribe.ps1` | Windows ships no Python, and bare `python` opens the Microsoft Store instead of erroring. PowerShell 5.1 is part of the OS |
+
+`scribe.ps1` targets Windows PowerShell 5.1, so it needs no PowerShell 7
+install and no modules. On Windows it also forces TLS 1.2, which 5.1 does not
+negotiate by default and without which the first call fails looking like a
+network fault.
+
 ## Commands
 
 ```bash
-export CLICKUP_TOKEN=pk_xxxxxxxx     # Settings > Apps > API Token
+export CLICKUP_TOKEN=pk_xxxxxxxx           # Settings > Apps > API Token
+```
+```powershell
+$env:CLICKUP_TOKEN = 'pk_xxxxxxxx'         # Windows
 ```
 
 **One task:**
@@ -46,6 +64,11 @@ export CLICKUP_TOKEN=pk_xxxxxxxx     # Settings > Apps > API Token
 scribe.py add --list 901615936216 --name "Payroll Export" \
               --parent 86d3qqd5f --description "Export a cutoff's payroll." \
               --status completed --assignee 88978416
+```
+```powershell
+.\scribe.ps1 add -List 901615936216 -Name "Payroll Export" `
+                 -Parent 86d3qqd5f -Description "Export a cutoff's payroll." `
+                 -Status completed -Assignee 88978416
 ```
 
 Checks the name against the list first and does nothing if it is already there.
@@ -56,6 +79,9 @@ Checks the name against the list first and does nothing if it is already there.
 ```bash
 scribe.py set 86d44avm2 --status completed
 ```
+```powershell
+.\scribe.ps1 set 86d44avm2 -Status completed
+```
 
 **A whole tree:**
 
@@ -63,6 +89,13 @@ scribe.py set 86d44avm2 --status completed
 scribe.py apply spec.json              # plan only, writes nothing
 scribe.py apply spec.json --apply      # create what is missing
 ```
+```powershell
+.\scribe.ps1 apply spec.json           # plan only
+.\scribe.ps1 apply spec.json -Apply    # create what is missing
+```
+
+PowerShell uses `-Apply` and `-DryRun` where Python uses `--apply` and
+`--dry-run`; everything else maps one to one.
 
 **Read the board:**
 
@@ -114,11 +147,12 @@ to a populated list. Naming, granularity, and how deep the nesting goes are
 conventions worth copying rather than reinventing.
 
 **Names are the idempotency key.** Renaming in a spec creates a second copy
-rather than renaming the original; use `scribe.py set --name` for that.
+rather than renaming the original; use the `set` command for that.
 
 ## Reference
 
 - `references/spec-format.md` - the JSON schema, with a worked example
 - `references/rest-endpoints.md` - endpoints, auth, and rate limits
-- `scripts/clickup_client.py` - importable client for anything the commands
-  do not cover
+- `scripts/clickup_client.py` - importable Python client for anything the
+  commands do not cover
+- `scripts/ClickUp.psm1` - the same client as a PowerShell module
