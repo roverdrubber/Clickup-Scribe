@@ -331,9 +331,12 @@ function Invoke-Apply {
     }
 
     $missing = @($nodes | Where-Object { -not $_.ExistingId })
+    # Both kinds of write count as an update: a reconcile fixing drift, and a
+    # status fix. They are applied by the same call and printed the same way.
+    $updating = @($updates).Count + @($pendingFixes).Count
     Write-Host ("list {0}: {1} tasks present" -f $listId, $board.Names.Count)
     Write-Host ("spec: {0} entries, {1} to create, {2} to update`n" -f
-                $nodes.Count, $missing.Count, @($updates).Count)
+                $nodes.Count, $missing.Count, $updating)
     Write-Tree -Nodes $roots
     foreach ($u in $updates) {
         $shown = (@($u.Changed.Keys | Sort-Object) |
@@ -381,7 +384,7 @@ function Invoke-Apply {
     }
 
     Write-Host ("`nDone. {0} created, {1} updated, {2} API calls." -f
-                $missing.Count, @($updates).Count, (Get-ClickUpCallCount))
+                $missing.Count, $updating, (Get-ClickUpCallCount))
     return 0
 }
 

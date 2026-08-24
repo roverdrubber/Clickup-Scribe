@@ -306,9 +306,12 @@ def cmd_apply(api: ClickUp, args) -> int:
                 updates.append((node, changed))
 
     missing = [n for n in nodes if not n.existing_id]
+    # Both kinds of write count as an update: a reconcile fixing drift, and a
+    # status_fix. They are applied by the same call and printed the same way.
+    updating = len(updates) + len(pending_fixes)
     print(f"list {list_id}: {len(names)} tasks present")
     print(f"spec: {len(nodes)} entries, {len(missing)} to create, "
-          f"{len(updates)} to update\n")
+          f"{updating} to update\n")
     render(roots)
     for node, changed in updates:
         shown = ", ".join(f"{k}={show_value(v)}" for k, v in sorted(changed.items()))
@@ -352,7 +355,7 @@ def cmd_apply(api: ClickUp, args) -> int:
         node.created_id = created["id"]
         print(f"created  {created['id']}  {node.name}")
 
-    print(f"\nDone. {len(missing)} created, {len(updates)} updated, "
+    print(f"\nDone. {len(missing)} created, {updating} updated, "
           f"{api.calls} API calls.")
     return 0
 
