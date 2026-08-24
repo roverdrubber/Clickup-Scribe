@@ -209,6 +209,70 @@ function Get-ClickUpStatuses {
 }
 
 
+function Get-ClickUpTask {
+    param(
+        [Parameter(Mandatory)][string]$TaskId,
+        [bool]$Subtasks = $true
+    )
+    $query = ''
+    if ($Subtasks) { $query = '?include_subtasks=true' }
+    return Invoke-ClickUp -Method GET -Path "/task/$TaskId$query"
+}
+
+
+# -- hierarchy --------------------------------------------------------------
+#
+# ClickUp's own vocabulary, which the UI hides: a Workspace is a "team" in the
+# API. Lists live either in a Folder or directly in a Space, and the folderless
+# ones are a separate endpoint - miss it and whole lists vanish from a
+# traversal without any error.
+
+function Get-ClickUpTeams {
+    <#.SYNOPSIS Workspaces the token can see.#>
+    param()
+    $payload = Invoke-ClickUp -Method GET -Path '/team'
+    if ($payload.PSObject.Properties.Name -contains 'teams') { return @($payload.teams) }
+    return @()
+}
+
+
+function Get-ClickUpSpaces {
+    param([Parameter(Mandatory)][string]$TeamId, [bool]$Archived = $false)
+    $flag = $Archived.ToString().ToLower()
+    $payload = Invoke-ClickUp -Method GET -Path "/team/$TeamId/space?archived=$flag"
+    if ($payload.PSObject.Properties.Name -contains 'spaces') { return @($payload.spaces) }
+    return @()
+}
+
+
+function Get-ClickUpFolders {
+    param([Parameter(Mandatory)][string]$SpaceId, [bool]$Archived = $false)
+    $flag = $Archived.ToString().ToLower()
+    $payload = Invoke-ClickUp -Method GET -Path "/space/$SpaceId/folder?archived=$flag"
+    if ($payload.PSObject.Properties.Name -contains 'folders') { return @($payload.folders) }
+    return @()
+}
+
+
+function Get-ClickUpFolderlessLists {
+    <#.SYNOPSIS Lists sitting directly in a Space, with no Folder above them.#>
+    param([Parameter(Mandatory)][string]$SpaceId, [bool]$Archived = $false)
+    $flag = $Archived.ToString().ToLower()
+    $payload = Invoke-ClickUp -Method GET -Path "/space/$SpaceId/list?archived=$flag"
+    if ($payload.PSObject.Properties.Name -contains 'lists') { return @($payload.lists) }
+    return @()
+}
+
+
+function Get-ClickUpFolderLists {
+    param([Parameter(Mandatory)][string]$FolderId, [bool]$Archived = $false)
+    $flag = $Archived.ToString().ToLower()
+    $payload = Invoke-ClickUp -Method GET -Path "/folder/$FolderId/list?archived=$flag"
+    if ($payload.PSObject.Properties.Name -contains 'lists') { return @($payload.lists) }
+    return @()
+}
+
+
 function New-ClickUpTask {
     param(
         [Parameter(Mandatory)][string]$ListId,
@@ -242,4 +306,5 @@ function Set-ClickUpTask {
 
 Export-ModuleMember -Function Invoke-ClickUp, Get-ClickUpTasks, Get-ClickUpList,
     Get-ClickUpStatuses, New-ClickUpTask, Set-ClickUpTask, Get-ClickUpToken,
-    Get-ClickUpCallCount
+    Get-ClickUpCallCount, Get-ClickUpTask, Get-ClickUpTeams, Get-ClickUpSpaces,
+    Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists

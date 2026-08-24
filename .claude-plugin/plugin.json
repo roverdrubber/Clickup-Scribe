@@ -1,7 +1,7 @@
 {
   "name": "clickup-scribe",
   "version": "0.1.0",
-  "description": "Write to a ClickUp board over REST without spending the MCP server's daily quota. One task or a whole tree, from flags or a declarative JSON spec. Idempotent by name, dry-run first, resumes cleanly after an interrupted run. Ships Python and PowerShell implementations so it runs with nothing installed on Linux, macOS, or Windows.",
+  "description": "Read and write ClickUp boards over REST without spending the MCP server's daily quota. Write one task or a whole tree from a declarative JSON spec; read spaces, folders, lists, tasks and subtasks, and export a board back into a spec. Idempotent, dry-run first, Python and PowerShell implementations so it runs with nothing installed on Linux, macOS, or Windows.",
   "author": {
     "name": "John Gabriel Bagacina"
   },

@@ -153,6 +153,9 @@ rather than renaming the original; use the `set` command for that.
 
 - `references/spec-format.md` - the JSON schema, with a worked example
 - `references/rest-endpoints.md` - endpoints, auth, and rate limits
-- `scripts/clickup_client.py` - importable Python client for anything the
-  commands do not cover
-- `scripts/ClickUp.psm1` - the same client as a PowerShell module
+- `${CLAUDE_PLUGIN_ROOT}/scripts/clickup_client.py` - importable Python client
+  for anything the commands do not cover
+- `${CLAUDE_PLUGIN_ROOT}/scripts/ClickUp.psm1` - the same client in PowerShell
+
+To **read** a board rather than write to it - hierarchy, tasks, search, export
+- use the `clickup-read` skill.

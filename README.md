@@ -50,11 +50,11 @@ Get a token from ClickUp > Settings > Apps > API Token.
 
 ```bash
 export CLICKUP_TOKEN=pk_xxxxxxxx
-SCRIBE=skills/clickup-scribe/scripts/scribe.py
+SCRIBE=scripts/scribe.py
 ```
 ```powershell
 $env:CLICKUP_TOKEN = 'pk_xxxxxxxx'
-$SCRIBE = 'skills\clickup-scribe\scripts\scribe.ps1'
+$SCRIBE = 'scripts\scribe.ps1'
 ```
 
 ### One task
@@ -147,19 +147,34 @@ keep on scripted, repeated, or bulk writes, and when the quota is gone.
 
 ```
 .claude-plugin/          plugin and marketplace manifests
-skills/clickup-scribe/
-  SKILL.md               when REST vs MCP, commands, pitfalls
-  references/
-    spec-format.md       the JSON schema
-    rest-endpoints.md    endpoints, auth, rate limits
-  scripts/
-    clickup_client.py    REST client, Python standard library only
-    scribe.py            add / set / apply / show / statuses
-    ClickUp.psm1         REST client, PowerShell 5.1+
-    scribe.ps1           the same five commands, for Windows
+scripts/
+  clickup_client.py      REST client, Python standard library only
+  ClickUp.psm1           REST client, PowerShell 5.1+
+  scribe.py / .ps1       add / set / apply / show / statuses
+  reader.py / .ps1       tree / tasks / get / find / export
+skills/
+  clickup-scribe/        writing: when REST vs MCP, commands, pitfalls
+    references/
+      spec-format.md     the JSON schema
+      rest-endpoints.md  endpoints, auth, rate limits
+  clickup-read/          reading: hierarchy, tasks, search, export
 examples/
   hris-api-list.json     worked example
 ```
+
+## Reading
+
+The `clickup-read` skill covers the other direction:
+
+```bash
+python3 scripts/reader.py tree                      # workspace structure
+python3 scripts/reader.py tasks --list 901615936216 # tasks, subtasks nested
+python3 scripts/reader.py find "payroll" --space 90161372882
+python3 scripts/reader.py export --list 901615936216 --as-spec > board.json
+```
+
+`--as-spec` emits a spec `scribe apply` can consume, so a board can be read
+from one list and replayed onto another.
 
 Both clients are dependency-free and importable on their own for anything the
 commands do not cover. The two implementations read the same spec files and

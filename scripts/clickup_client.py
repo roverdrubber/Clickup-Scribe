@@ -117,6 +117,42 @@ class ClickUp:
     def statuses(self, list_id: str) -> list[str]:
         return [s["status"] for s in self.get_list(list_id).get("statuses", [])]
 
+    def get_task(self, task_id: str, subtasks: bool = True) -> dict:
+        query = "?include_subtasks=true" if subtasks else ""
+        return self._call("GET", f"/task/{task_id}{query}")
+
+    # -- hierarchy --------------------------------------------------------
+    #
+    # ClickUp's own vocabulary, which the UI hides: a Workspace is a "team" in
+    # the API. Lists live either in a Folder or directly in a Space, and the
+    # folderless ones are a separate endpoint - miss it and whole lists vanish
+    # from a traversal without any error.
+
+    def teams(self) -> list[dict]:
+        """Workspaces the token can see."""
+        return self._call("GET", "/team").get("teams", [])
+
+    def spaces(self, team_id: str, archived: bool = False) -> list[dict]:
+        return self._call(
+            "GET", f"/team/{team_id}/space?archived={str(archived).lower()}"
+        ).get("spaces", [])
+
+    def folders(self, space_id: str, archived: bool = False) -> list[dict]:
+        return self._call(
+            "GET", f"/space/{space_id}/folder?archived={str(archived).lower()}"
+        ).get("folders", [])
+
+    def folderless_lists(self, space_id: str, archived: bool = False) -> list[dict]:
+        """Lists sitting directly in a Space, with no Folder above them."""
+        return self._call(
+            "GET", f"/space/{space_id}/list?archived={str(archived).lower()}"
+        ).get("lists", [])
+
+    def folder_lists(self, folder_id: str, archived: bool = False) -> list[dict]:
+        return self._call(
+            "GET", f"/folder/{folder_id}/list?archived={str(archived).lower()}"
+        ).get("lists", [])
+
     # -- writes -----------------------------------------------------------
 
     def create_task(self, list_id: str, name: str, description: str = "",
