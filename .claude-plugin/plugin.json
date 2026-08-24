@@ -1,20 +1,21 @@
 {
-  "name": "clickup-bulk",
+  "name": "clickup-scribe",
   "version": "0.1.0",
-  "description": "Bulk ClickUp task work that does not burn the MCP server's daily quota. Routes structural changes - populating a list, mirroring a roadmap onto a board, building parent/subtask trees - through the REST API from a declarative JSON spec. Idempotent, dry-run first, resumes cleanly after an interrupted run.",
+  "description": "Write to a ClickUp board over REST without spending the MCP server's daily quota. One task or a whole tree, from flags or a declarative JSON spec. Idempotent by name, dry-run first, resumes cleanly after an interrupted run.",
   "author": {
     "name": "John Gabriel Bagacina"
   },
   "license": "MIT",
   "keywords": [
     "clickup",
-    "bulk",
+    "tasks",
     "rest-api",
     "rate-limit",
     "mcp",
     "task-management",
     "project-management",
     "idempotent",
-    "backlog"
+    "backlog",
+    "bulk"
   ]
 }

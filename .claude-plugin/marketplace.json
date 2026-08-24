@@ -1,17 +1,17 @@
 {
-  "name": "clickup-bulk-marketplace",
+  "name": "clickup-scribe-marketplace",
   "owner": {
     "name": "John Gabriel Bagacina"
   },
   "metadata": {
-    "description": "clickup-bulk: bulk ClickUp task work over REST, without spending the MCP daily quota",
+    "description": "clickup-scribe: write to a ClickUp board over REST, one task or a whole tree, without spending the MCP daily quota",
     "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "clickup-bulk",
+      "name": "clickup-scribe",
       "source": "./",
-      "description": "Bulk ClickUp task work that does not burn the MCP server's daily quota. Declarative JSON spec, idempotent, dry-run first.",
+      "description": "Write to a ClickUp board over REST without spending the MCP server's daily quota. One task or a whole tree. Idempotent, dry-run first.",
       "version": "0.1.0",
       "author": {
         "name": "John Gabriel Bagacina"
