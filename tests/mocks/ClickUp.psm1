@@ -216,6 +216,45 @@ function Set-ClickUpTask {
 }
 
 
+function New-ClickUpFolder {
+    param([string]$SpaceId, [string]$Name)
+    $script:Calls++
+    $state = Get-State
+    $n = [int]$state.n + 1
+    $id = 'fold{0:D2}' -f $n
+    $state | Add-Member -NotePropertyName folders -NotePropertyValue @() -Force `
+        -ErrorAction SilentlyContinue
+    $state.folders = @(@(Get-Member2 $state 'folders' @()) +
+        @([pscustomobject]@{ id = $id; space_id = $SpaceId; name = $Name }))
+    $state.n = $n
+    Save-State -State $state
+    return [pscustomobject]@{ id = $id; name = $Name }
+}
+
+
+function New-ClickUpList {
+    param([string]$Name, [string]$FolderId, [string]$SpaceId, [string]$Content)
+    if ([bool]$FolderId -eq [bool]$SpaceId) {
+        throw 'a list needs exactly one container: FolderId or SpaceId.'
+    }
+    $script:Calls++
+    $state = Get-State
+    $n = [int]$state.n + 1
+    $id = 'list{0:D2}' -f $n
+    $folderValue = $null; if ($FolderId) { $folderValue = $FolderId }
+    $spaceValue = $null;  if ($SpaceId)  { $spaceValue = $SpaceId }
+    $contentValue = $null; if ($Content) { $contentValue = $Content }
+    $state | Add-Member -NotePropertyName lists -NotePropertyValue @() -Force `
+        -ErrorAction SilentlyContinue
+    $state.lists = @(@(Get-Member2 $state 'lists' @()) +
+        @([pscustomobject]@{ id = $id; folder_id = $folderValue
+                             space_id = $spaceValue; name = $Name; content = $contentValue }))
+    $state.n = $n
+    Save-State -State $state
+    return [pscustomobject]@{ id = $id; name = $Name }
+}
+
+
 function Remove-ClickUpTask {
     param([string]$TaskId)
     $script:Calls++

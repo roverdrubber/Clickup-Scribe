@@ -102,6 +102,22 @@ Without `--yes` it prints what would go - the task and its subtasks - and
 refuses. Deleted tasks sit in the workspace trash for 30 days. This is the only
 command here that destroys anything.
 
+**Create the container first,** when the list does not exist yet:
+
+```bash
+scribe.py add-folder --space 90161372882 --name "Reporting"
+scribe.py add-list --folder 901610445259 --name "Frontend"
+scribe.py add-list --space 90161372882 --name "Scratch"   # folderless
+```
+```powershell
+.\scribe.ps1 add-folder -Space 90161372882 -Name "Reporting"
+.\scribe.ps1 add-list -Folder 901610445259 -Name "Frontend"
+```
+
+A list needs exactly one container - `--folder` or `--space`, never both.
+Both commands skip silently if the name already exists, so they are safe to
+put at the top of a setup script. Feed the returned list id to a spec.
+
 **A whole tree:**
 
 ```bash
@@ -174,6 +190,13 @@ covers - the MCP's `add_tag_to_task` handles that, or the UI.
 **Descriptions are not reconciled.** `apply` creates what is missing; it does
 not update the description, priority, or dates of a task that already exists.
 Use `set` for that.
+
+## Still not covered
+
+Deliberately. These stay on the MCP, which handles them in one call each and
+has no bulk story worth scripting: comments, documents, chat, time tracking,
+attachments, tags creation, task dependencies and links, moving or merging
+tasks, reminders, custom field values, and full-text search.
 
 ## Reference
 

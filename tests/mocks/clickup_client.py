@@ -159,6 +159,30 @@ class ClickUp(_real.ClickUp):
         _save(state)
         return {}
 
+    def create_folder(self, space_id, name):
+        self.calls += 1
+        state = _state()
+        state["n"] += 1
+        folder_id = f"fold{state['n']:02d}"
+        state.setdefault("folders", []).append(
+            {"id": folder_id, "space_id": space_id, "name": name})
+        _save(state)
+        return {"id": folder_id, "name": name}
+
+    def create_list(self, name, folder_id=None, space_id=None, content=None):
+        if bool(folder_id) == bool(space_id):
+            raise ClickUpError(
+                "a list needs exactly one container: folder_id or space_id.")
+        self.calls += 1
+        state = _state()
+        state["n"] += 1
+        new_id = f"list{state['n']:02d}"
+        state.setdefault("lists", []).append(
+            {"id": new_id, "folder_id": folder_id, "space_id": space_id,
+             "name": name, "content": content})
+        _save(state)
+        return {"id": new_id, "name": name}
+
     def delete_task(self, task_id):
         self.calls += 1
         state = _state()

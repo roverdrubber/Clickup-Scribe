@@ -30,7 +30,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('add', 'set', 'apply', 'delete', 'show', 'statuses')]
+    [ValidateSet('add', 'set', 'apply', 'delete', 'add-folder', 'add-list',
+                 'show', 'statuses')]
     [string]$Command,
 
     # Task id for `set`, spec path for `apply`.
@@ -38,6 +39,9 @@ param(
     [string]$Target,
 
     [string]$List,
+    [string]$Space,
+    [string]$Folder,
+    [string]$Content,
     [string]$Name,
     [string]$Description,
     [string]$Parent,
@@ -335,6 +339,58 @@ function Invoke-Apply {
 }
 
 
+function Invoke-AddFolder {
+    <#.SYNOPSIS Create a folder in a space, unless one of that name is already there.#>
+    if (-not $Space) { Write-Host 'add-folder requires -Space'; return 1 }
+    if (-not $Name)  { Write-Host 'add-folder requires -Name';  return 1 }
+
+    $existing = @(Get-ClickUpFolders -SpaceId $Space | Where-Object { $_.name -eq $Name })
+    if ($existing.Count -gt 0) {
+        Write-Host ("exists   {0}  {1}" -f $existing[0].id, $Name)
+        return 0
+    }
+
+    Write-Host ("  + folder {0}  (in space {1})" -f $Name, $Space)
+    if ($DryRun) { Write-Host "`nDry run. Drop -DryRun to write."; return 0 }
+
+    $created = New-ClickUpFolder -SpaceId $Space -Name $Name
+    Write-Host ("created  {0}  {1}" -f $created.id, $Name)
+    return 0
+}
+
+
+function Invoke-AddList {
+    <#.SYNOPSIS Create a list in a folder or directly in a space.#>
+    if (-not $Name) { Write-Host 'add-list requires -Name'; return 1 }
+    if ([bool]$Folder -eq [bool]$Space) {
+        Write-Host 'add-list needs exactly one container: -Folder or -Space.'
+        return 1
+    }
+
+    if ($Folder) {
+        $siblings = @(Get-ClickUpFolderLists -FolderId $Folder)
+        $where = "folder $Folder"
+    } else {
+        $siblings = @(Get-ClickUpFolderlessLists -SpaceId $Space)
+        $where = "space $Space"
+    }
+
+    $existing = @($siblings | Where-Object { $_.name -eq $Name })
+    if ($existing.Count -gt 0) {
+        Write-Host ("exists   {0}  {1}" -f $existing[0].id, $Name)
+        return 0
+    }
+
+    Write-Host ("  + list {0}  (in {1})" -f $Name, $where)
+    if ($DryRun) { Write-Host "`nDry run. Drop -DryRun to write."; return 0 }
+
+    $created = New-ClickUpList -Name $Name -FolderId $Folder -SpaceId $Space -Content $Content
+    Write-Host ("created  {0}  {1}" -f $created.id, $Name)
+    Write-Host 'Put this id in a spec''s list_id to fill it.'
+    return 0
+}
+
+
 function Invoke-Delete {
     <#.SYNOPSIS Remove a task. Refuses without -Yes: nothing else here destroys data.#>
     if (-not $Target) { Write-Host 'delete requires a task id'; return 1 }
@@ -386,6 +442,8 @@ try {
         'set'      { exit (Invoke-Set) }
         'apply'    { exit (Invoke-Apply) }
         'delete'   { exit (Invoke-Delete) }
+        'add-folder' { exit (Invoke-AddFolder) }
+        'add-list'   { exit (Invoke-AddList) }
         'show'     { exit (Invoke-Show) }
         'statuses' { exit (Invoke-Statuses) }
     }

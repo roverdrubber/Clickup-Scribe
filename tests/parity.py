@@ -152,6 +152,41 @@ def scenarios() -> list[dict]:
              (["show", "--list", LIST_ID], ["show", "-List", LIST_ID]),
          ]},
 
+        {"name": "add-folder: create, then idempotent repeat", "tool": "scribe",
+         "steps": [
+             (["add-folder", "--space", "90161372882", "--name", "Reporting"],
+              ["add-folder", "-Space", "90161372882", "-Name", "Reporting"]),
+             (["add-folder", "--space", "90161372882", "--name", "HRIS"],
+              ["add-folder", "-Space", "90161372882", "-Name", "HRIS"]),
+         ]},
+
+        {"name": "add-list: in a folder", "tool": "scribe",
+         "steps": [
+             (["add-list", "--folder", "901610445259", "--name", "Frontend"],
+              ["add-list", "-Folder", "901610445259", "-Name", "Frontend"]),
+             (["add-list", "--folder", "901610445259", "--name", "API"],
+              ["add-list", "-Folder", "901610445259", "-Name", "API"]),
+         ]},
+
+        {"name": "add-list: directly in a space", "tool": "scribe",
+         "steps": [(["add-list", "--space", "90161372882", "--name", "Scratch"],
+                    ["add-list", "-Space", "90161372882", "-Name", "Scratch"])]},
+
+        {"name": "add-list: needs exactly one container", "tool": "scribe",
+         "steps": [
+             (["add-list", "--name", "Nowhere"], ["add-list", "-Name", "Nowhere"]),
+             (["add-list", "--name", "Both", "--folder", "901610445259",
+               "--space", "90161372882"],
+              ["add-list", "-Name", "Both", "-Folder", "901610445259",
+               "-Space", "90161372882"]),
+         ]},
+
+        {"name": "add-folder: dry run writes nothing", "tool": "scribe",
+         "steps": [(["add-folder", "--space", "90161372882", "--name", "Ghost",
+                     "--dry-run"],
+                    ["add-folder", "-Space", "90161372882", "-Name", "Ghost",
+                     "-DryRun"])]},
+
         {"name": "apply: create, then converged no-op", "tool": "scribe",
          "steps": [
              (["apply", spec, "--apply"], ["apply", spec, "-Apply"]),

@@ -313,5 +313,28 @@ class ClickUp:
         """Move a task to the workspace trash. Recoverable there for 30 days."""
         return self._call("DELETE", f"/task/{task_id}")
 
+    # -- structure --------------------------------------------------------
+    #
+    # A List is created against whichever container holds it, so the endpoint
+    # differs: inside a Folder, or directly in a Space. There is no single
+    # "create list" call that takes a parent of either kind.
+
+    def create_folder(self, space_id: str, name: str) -> dict:
+        return self._call("POST", f"/space/{space_id}/folder", {"name": name})
+
+    def create_list(self, name: str, folder_id: str | None = None,
+                    space_id: str | None = None,
+                    content: str | None = None) -> dict:
+        if bool(folder_id) == bool(space_id):
+            raise ClickUpError(
+                "a list needs exactly one container: folder_id or space_id."
+            )
+        body: dict = {"name": name}
+        if content:
+            body["content"] = content
+        if folder_id:
+            return self._call("POST", f"/folder/{folder_id}/list", body)
+        return self._call("POST", f"/space/{space_id}/list", body)
+
     def update_task(self, task_id: str, **fields) -> dict:
         return self._call("PUT", f"/task/{task_id}", fields)

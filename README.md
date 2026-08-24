@@ -77,6 +77,7 @@ tasks. `--dry-run` previews; `--allow-duplicate` skips the check.
 
 ```bash
 python3 $SCRIBE set 86d44avm2 --status completed
+python3 $SCRIBE delete 86d44avm2 --yes
 ```
 
 ### A whole tree
@@ -84,6 +85,13 @@ python3 $SCRIBE set 86d44avm2 --status completed
 ```bash
 python3 $SCRIBE apply spec.json           # plan only, writes nothing
 python3 $SCRIBE apply spec.json --apply   # create what is missing
+```
+
+### Create containers
+
+```bash
+python3 $SCRIBE add-folder --space 90161372882 --name "Reporting"
+python3 $SCRIBE add-list --folder 901610445259 --name "Frontend"
 ```
 
 ### Read the board

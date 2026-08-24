@@ -191,6 +191,53 @@ def cmd_set(api: ClickUp, args) -> int:
     return 0
 
 
+def cmd_add_folder(api: ClickUp, args) -> int:
+    """Create a folder in a space, unless one of that name is already there."""
+    existing = [f for f in api.folders(args.space) if f["name"] == args.name]
+    if existing:
+        print(f"exists   {existing[0]['id']}  {args.name}")
+        return 0
+
+    print(f"  + folder {args.name}  (in space {args.space})")
+    if args.dry_run:
+        print("\nDry run. Drop --dry-run to write.")
+        return 0
+
+    created = api.create_folder(args.space, args.name)
+    print(f"created  {created['id']}  {args.name}")
+    return 0
+
+
+def cmd_add_list(api: ClickUp, args) -> int:
+    """Create a list in a folder or directly in a space."""
+    if bool(args.folder) == bool(args.space):
+        print("add-list needs exactly one container: --folder or --space.")
+        return 1
+
+    if args.folder:
+        siblings = api.folder_lists(args.folder)
+        where = f"folder {args.folder}"
+    else:
+        siblings = api.folderless_lists(args.space)
+        where = f"space {args.space}"
+
+    existing = [l for l in siblings if l["name"] == args.name]
+    if existing:
+        print(f"exists   {existing[0]['id']}  {args.name}")
+        return 0
+
+    print(f"  + list {args.name}  (in {where})")
+    if args.dry_run:
+        print("\nDry run. Drop --dry-run to write.")
+        return 0
+
+    created = api.create_list(args.name, folder_id=args.folder,
+                              space_id=args.space, content=args.content)
+    print(f"created  {created['id']}  {args.name}")
+    print("Put this id in a spec's list_id to fill it.")
+    return 0
+
+
 def cmd_delete(api: ClickUp, args) -> int:
     """Remove a task. Refuses without --yes: nothing else here destroys data."""
     task = api.get_task(args.task_id, subtasks=True)
@@ -341,6 +388,20 @@ def build_parser() -> argparse.ArgumentParser:
     delete.add_argument("--yes", action="store_true",
                         help="required; without it this only shows what would go")
     delete.set_defaults(func=cmd_delete)
+
+    add_folder = sub.add_parser("add-folder", help="create a folder in a space")
+    add_folder.add_argument("--space", required=True, metavar="SPACE_ID")
+    add_folder.add_argument("--name", required=True)
+    add_folder.add_argument("--dry-run", action="store_true")
+    add_folder.set_defaults(func=cmd_add_folder)
+
+    add_list = sub.add_parser("add-list", help="create a list in a folder or space")
+    add_list.add_argument("--name", required=True)
+    add_list.add_argument("--folder", metavar="FOLDER_ID")
+    add_list.add_argument("--space", metavar="SPACE_ID")
+    add_list.add_argument("--content", help="the list's description")
+    add_list.add_argument("--dry-run", action="store_true")
+    add_list.set_defaults(func=cmd_add_list)
 
     show = sub.add_parser("show", help="print what is on a list")
     show.add_argument("--list", required=True, metavar="LIST_ID")

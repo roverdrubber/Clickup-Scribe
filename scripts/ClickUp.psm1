@@ -455,6 +455,35 @@ function New-ClickUpTask {
 }
 
 
+# -- structure --------------------------------------------------------------
+#
+# A List is created against whichever container holds it, so the endpoint
+# differs: inside a Folder, or directly in a Space. There is no single
+# "create list" call that takes a parent of either kind.
+
+function New-ClickUpFolder {
+    param([Parameter(Mandatory)][string]$SpaceId, [Parameter(Mandatory)][string]$Name)
+    return Invoke-ClickUp -Method POST -Path "/space/$SpaceId/folder" -Body @{ name = $Name }
+}
+
+
+function New-ClickUpList {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string]$FolderId,
+        [string]$SpaceId,
+        [string]$Content
+    )
+    if ([bool]$FolderId -eq [bool]$SpaceId) {
+        throw 'a list needs exactly one container: FolderId or SpaceId.'
+    }
+    $body = @{ name = $Name }
+    if ($Content) { $body['content'] = $Content }
+    if ($FolderId) { return Invoke-ClickUp -Method POST -Path "/folder/$FolderId/list" -Body $body }
+    return Invoke-ClickUp -Method POST -Path "/space/$SpaceId/list" -Body $body
+}
+
+
 function Remove-ClickUpTask {
     <#.SYNOPSIS Move a task to the workspace trash. Recoverable there for 30 days.#>
     param([Parameter(Mandatory)][string]$TaskId)
@@ -476,4 +505,5 @@ Export-ModuleMember -Function Invoke-ClickUp, Get-ClickUpTasks, Get-ClickUpList,
     Get-ClickUpCallCount, Get-ClickUpTask, Get-ClickUpTeams, Get-ClickUpSpaces,
     Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists,
     Remove-ClickUpTask, Get-ClickUpMembers, Resolve-ClickUpAssignees,
-    New-ClickUpTaskBody, ConvertTo-Priority, ConvertTo-EpochMs
+    New-ClickUpTaskBody, ConvertTo-Priority, ConvertTo-EpochMs,
+    New-ClickUpFolder, New-ClickUpList
