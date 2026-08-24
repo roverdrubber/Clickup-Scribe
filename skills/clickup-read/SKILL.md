@@ -96,6 +96,8 @@ or a note rather than re-walking the hierarchy to find it again.
 ## Reference
 
 - `../clickup-scribe/references/rest-endpoints.md` - endpoints, auth, limits
+- `../clickup-scribe/references/curl-recipes.md` - raw curl for a single read
+  when there is no runtime available
 - `../clickup-scribe/references/spec-format.md` - what `--as-spec` produces
 - `${CLAUDE_PLUGIN_ROOT}/scripts/reader.py`, `reader.ps1` - the commands
 - `${CLAUDE_PLUGIN_ROOT}/scripts/clickup_client.py`, `ClickUp.psm1` - clients

@@ -157,6 +157,7 @@ skills/
     references/
       spec-format.md     the JSON schema
       rest-endpoints.md  endpoints, auth, rate limits
+      curl-recipes.md    raw curl, for hosts with no runtime
   clickup-read/          reading: hierarchy, tasks, search, export
 examples/
   hris-api-list.json     worked example
@@ -179,6 +180,14 @@ from one list and replayed onto another.
 Both clients are dependency-free and importable on their own for anything the
 commands do not cover. The two implementations read the same spec files and
 behave identically; they are verified against the same test matrix.
+
+## No runtime at all
+
+For a locked-down box, a container, or a single call not worth scripting,
+[`curl-recipes.md`](skills/clickup-scribe/references/curl-recipes.md) has the
+raw calls, with the shell-quoting differences that trip them up. curl covers
+transport only - it cannot parse JSON, hold a name-to-id map, or page a result
+set, so it is for inspecting and one-off changes, not for loops.
 
 ## Token handling
 
