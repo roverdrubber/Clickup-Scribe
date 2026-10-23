@@ -182,6 +182,64 @@ are excluded too - updates use add/remove semantics rather than a flat list.
 PowerShell uses `-Apply`, `-DryRun`, and `-Reconcile` where Python uses
 `--apply`, `--dry-run`, and `--reconcile`; everything else maps one to one.
 
+**Link shipped commits to a task:**
+
+```bash
+scribe.py commits 86d44avm2 --range v1.2.0..v1.3.0 --dry-run   # preview
+scribe.py commits 86d44avm2 --range v1.2.0..v1.3.0             # post
+scribe.py commits --spec links.json                             # plan only
+scribe.py commits --spec links.json --apply                     # post
+```
+```powershell
+.\scribe.ps1 commits 86d44avm2 -Range v1.2.0..v1.3.0 -DryRun
+.\scribe.ps1 commits -Spec links.json -Apply
+```
+
+Why a comment: ClickUp's public API (v2 and v3) has no endpoint for the
+Bitbucket/GitHub integration panel. It cannot list connected repositories,
+cannot "Add Bitbucket link", and cannot attach a commit or a branch. The panel
+fills itself only when ClickUp receives a push webhook whose commit message,
+branch name, or PR title contains `CU-<task-id>` - and history already pushed
+cannot gain that without being rewritten. A comment is the only record the API
+can write.
+
+So `commits` posts one plain-text comment per task: a title, then each commit
+as its 8-character short SHA, subject, and web link. Ranges are read with
+`git log --reverse --no-merges` from `--repo` (default: the current directory)
+and deduplicated; `--range` repeats (`-Range a..b,c..d` in PowerShell). The web
+link comes from the `origin` remote - Bitbucket, GitHub, or any GitLab host -
+or from `--web-url` for anything else.
+
+**Idempotent by SHA.** Every comment on the task is read, past the first page,
+and a commit whose full 40-character SHA appears in any of them is skipped. A
+re-run posts nothing; a widened range posts only what is new. Dry run first:
+a single task posts unless `--dry-run`, and `--spec` writes nothing without
+`--apply`.
+
+A links spec is a JSON array, or an object carrying shared `repo` / `web_url`
+(command-line flags win):
+
+```json
+{
+  "repo": "../my-service",
+  "links": [
+    { "task": "86d44avm2", "ranges": ["v1.2.0..v1.3.0"] },
+    { "task": "86d44avm3", "ranges": ["a1b2c3d..e4f5a6b"], "title": "Rounding fix" }
+  ]
+}
+```
+
+Every entry is validated and every range resolved before the first comment is
+read, so one bad range stops the run with the board untouched.
+
+**Convention going forward.** Put the task id in a commit footer,
+`Refs: CU-<task-id>` - comma-separate several, `Refs: CU-abc, CU-def`. It
+passes `@commitlint/config-conventional` and lets the integration panel link
+the commit on push. Do not rename branches to `CU-...`: that breaks
+`feature/<name>` conventions, and a branch can name only one task. Keep
+`commits` for backfill and for commits that missed the footer. Link commits to
+the leaf subtask that did the work, not to a parent or domain row.
+
 **Read the board:**
 
 ```bash
@@ -246,7 +304,8 @@ both are converted for you, so `90` means an hour and a half.
 ## Still not covered
 
 Deliberately. These stay on the MCP, which handles them in one call each and
-has no bulk story worth scripting: comments, documents, chat, time tracking,
+has no bulk story worth scripting: comments (other than `commits`' links),
+documents, chat, time tracking,
 attachments, tags creation, task dependencies and links, moving or merging
 tasks, reminders, custom field values, and full-text search.
 

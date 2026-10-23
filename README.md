@@ -204,6 +204,21 @@ python3 $SCRIBE add-folder --space 90161372882 --name "Reporting"
 python3 $SCRIBE add-list --folder 901610445259 --name "Frontend"
 ```
 
+### Link commits to a task
+
+```bash
+python3 $SCRIBE commits 86d44avm2 --range v1.2.0..v1.3.0 --dry-run
+python3 $SCRIBE commits 86d44avm2 --range v1.2.0..v1.3.0
+python3 $SCRIBE commits --spec links.json --apply
+```
+
+ClickUp's API has no endpoint for the Bitbucket/GitHub integration panel, so
+this posts one comment of commit web links instead. Every existing comment is
+read first and a commit whose full SHA already appears is skipped, so re-runs
+post nothing. Going forward, a `Refs: CU-<task-id>` commit footer lets the
+integration link commits on push; `commits` is for backfill. See the
+[skill](skills/clickup-scribe/SKILL.md) for the spec format.
+
 ### Read the board
 
 ```bash
@@ -273,13 +288,13 @@ scripts/                 the tool - harness-agnostic, stdlib only
   ClickUp.psm1           REST client, PowerShell 5.1+
   setup.py / .ps1        store / show / clear the API token
   scribe.py / .ps1       add / set / apply / delete / add-folder / add-list /
-                         show / statuses
+                         show / statuses / commits
   reader.py / .ps1       tree / tasks / get / find / members / export
 skills/
   clickup-scribe/        writing: when REST vs MCP, commands, pitfalls
     references/
       spec-format.md     the JSON schema
-      rest-endpoints.md  endpoints, auth, rate limits
+      rest-endpoints.md  endpoints, auth, rate limits, comments
       curl-recipes.md    raw curl, for hosts with no runtime
   clickup-read/          reading: hierarchy, tasks, search, export
   clickup-setup/         the one-time API token walkthrough
@@ -331,7 +346,7 @@ against the same fixture and diffs stdout and exit codes, so a fix that lands
 in one and not the other fails loudly:
 
 ```bash
-python3 tests/parity.py       # 35 scenarios
+python3 tests/parity.py       # 47 scenarios
 python3 tests/parity.py -v    # show both outputs on failure
 ```
 

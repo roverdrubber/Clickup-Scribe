@@ -81,6 +81,36 @@ Returns `statuses[]` - the only authoritative source for which status strings
 this list accepts. Validate against it before a bulk create; an invalid status
 fails every create in the run, one wasted call at a time.
 
+### Task comments
+
+```
+GET /task/{task_id}/comment
+GET /task/{task_id}/comment?start={date}&start_id={id}
+```
+
+Returns `{"comments": [...]}`, **newest first, 25 per page.** Each carries
+`id`, `date` (epoch milliseconds, as a string), `comment_text` (plain text),
+`comment` (rich-text segments), and `user`.
+
+To page back, pass the **oldest** comment of the page just received: its
+`date` as `start` and its `id` as `start_id`. Both are required together.
+Stop when a page holds fewer than 25. Like the task list, a read that stops at
+the first page understates what exists - for `commits` it means a commit
+linked long ago is posted again.
+
+```
+POST /task/{task_id}/comment
+{ "comment_text": "Commits v1.2.0..v1.3.0\n\n...", "notify_all": false }
+```
+
+`comment_text` and `notify_all` are both required. `notify_all: true` also
+notifies the comment's creator; assignees and watchers are notified either
+way. Optional `assignee` assigns the comment. Returns `{id, hist_id, date}`.
+
+There is no endpoint for the integration panel's commit, branch, or pull
+request links - not in v2, not in v3. A comment is the nearest thing the API
+can write.
+
 ### Members
 
 ```

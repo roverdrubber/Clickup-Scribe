@@ -53,7 +53,7 @@ A fix in one and not the other is the defect this project is most prone to.
 **Run the parity suite before claiming a change works:**
 
 ```bash
-python3 tests/parity.py       # 35 scenarios, both runtimes, diffed
+python3 tests/parity.py       # 47 scenarios, both runtimes, diffed
 python3 tests/parity.py -v    # show both outputs on failure
 ```
 
@@ -73,3 +73,10 @@ live board is expensive to reconcile.
 **Idempotency is the contract.** Tasks are matched by name across the whole
 list, following pagination to the end, before anything is created. A truncated
 read means duplicates on someone's board.
+
+**`commits` is a comment-based stand-in** for the integration API ClickUp does
+not have: no endpoint attaches a commit, branch, or PR to a task. Its
+idempotency key is the full 40-character SHA appearing anywhere in an existing
+comment on the task. Changing the comment format so that SHA no longer appears
+in full breaks dedupe against every comment already posted - each re-run would
+post them all again.
