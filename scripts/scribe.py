@@ -9,6 +9,8 @@
     scribe.py apply spec.json --apply         # create what is missing
     scribe.py show  --list 901615936216       # what is on the list now
     scribe.py statuses --list 901615936216    # valid status strings
+    scribe.py commits 86d44avm2 --range v1.2.0..v1.3.0 --dry-run
+    scribe.py commits --spec links.json --apply
 
 Every write is idempotent by task name: a task that already exists is reused,
 never duplicated. Re-running after an interruption resumes where it stopped.
@@ -20,6 +22,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -360,6 +364,291 @@ def cmd_apply(api: ClickUp, args) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------
+# commits: git history as task comments
+# --------------------------------------------------------------------------
+#
+# ClickUp's API has no endpoint for the integration panel's commit links, so
+# commits are recorded as a comment of web links instead. The full SHA in the
+# comment text is the idempotency key: a commit whose SHA already appears in
+# any comment on the task is never posted again.
+
+class CommitsError(Exception):
+    """A commits request that cannot go ahead. Printed, exit 1, nothing written."""
+
+
+SHORT_SHA = 8
+
+# https://host/org/repo, ssh://git@host:22/org/repo, user@host:org/repo.
+URL_REMOTE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]+@)?([^/:]+)(?::[0-9]+)?/(.+)$")
+SCP_REMOTE = re.compile(r"^(?:[^@/]+@)?([^:/]+):(.+)$")
+
+
+def git(repo: str, *args: str) -> str:
+    """Run git against `repo`; its first stderr line becomes the error."""
+    try:
+        proc = subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                              encoding="utf-8", errors="replace")
+    except OSError:
+        raise CommitsError("git is not on PATH.") from None
+    if proc.returncode != 0:
+        lines = [line.strip() for line in proc.stderr.splitlines() if line.strip()]
+        raise CommitsError(lines[0] if lines else f"git exited {proc.returncode}")
+    return proc.stdout
+
+
+def resolve_commits(repo: str, ranges: list[str]) -> list[tuple[str, str]]:
+    """(sha, subject) oldest first, ranges in the order given, no repeats."""
+    commits: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for rng in ranges:
+        # A leading dash would reach git as an option, not a revision.
+        if not rng or rng.startswith("-"):
+            raise CommitsError(f"'{rng}' is not a revision range.")
+        try:
+            # The trailing `--` stops git reading a range as a file path.
+            out = git(repo, "log", "--reverse", "--no-merges",
+                      "--format=%H%x09%s", rng, "--")
+        except CommitsError as error:
+            raise CommitsError(f"git log failed for range '{rng}': {error}") from None
+        found = 0
+        for line in out.splitlines():
+            line = line.rstrip("\r")
+            if not line:
+                continue
+            sha, _, subject = line.partition("\t")
+            found += 1
+            if sha not in seen:
+                seen.add(sha)
+                commits.append((sha, subject))
+        if not found:
+            raise CommitsError(f"range '{rng}' contains no commits.")
+    return commits
+
+
+def parse_remote(url: str) -> tuple[str, str] | None:
+    """(host, org/repo) from any remote spelling, or None."""
+    url = url.strip()
+    match = URL_REMOTE.match(url) or SCP_REMOTE.match(url)
+    if not match:
+        return None
+    path = match.group(2).rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    return match.group(1).lower(), path
+
+
+def commit_path(host: str) -> str | None:
+    """The per-commit path segment each forge uses, or None for an unknown one."""
+    if host == "bitbucket.org":
+        return "/commits/"
+    if host == "github.com":
+        return "/commit/"
+    if "gitlab" in host:
+        return "/-/commit/"
+    return None
+
+
+def web_base(repo: str, web_url: str | None) -> tuple[str, str]:
+    """(repository web URL, per-commit path) from --web-url or the origin remote."""
+    if web_url:
+        parsed = URL_REMOTE.match(web_url.strip())
+        if not parsed:
+            raise CommitsError(f"--web-url '{web_url}' is not a URL. "
+                               "Use the repository's web address, https://...")
+        base = web_url.strip().rstrip("/")
+        if base.endswith(".git"):
+            base = base[:-4]
+        return base, commit_path(parsed.group(1).lower()) or "/commit/"
+
+    try:
+        remote = git(repo, "remote", "get-url", "origin").strip()
+    except CommitsError:
+        raise CommitsError("cannot read the 'origin' remote. "
+                           "Pass --web-url with the repository's web address.") from None
+    parsed = parse_remote(remote)
+    if not parsed:
+        raise CommitsError(f"cannot read the 'origin' remote '{remote}'. "
+                           "Pass --web-url with the repository's web address.")
+    host, path = parsed
+    style = commit_path(host)
+    if style is None:
+        raise CommitsError(f"unknown git host '{host}'. "
+                           "Pass --web-url with the repository's web address.")
+    return f"https://{host}/{path}", style
+
+
+def comment_body(title: str, commits: list[tuple[str, str]], base: str,
+                 style: str) -> str:
+    blocks = [title] + [
+        f"{sha[:SHORT_SHA]} {subject}\n{base}{style}{sha}" for sha, subject in commits
+    ]
+    return "\n\n".join(blocks)
+
+
+def plan_link(api: ClickUp, task: str, commits: list[tuple[str, str]],
+              title: str, base: str, style: str) -> dict:
+    """Read every comment on `task`; keep only the commits none of them names."""
+    comments = api.get_comments(task)
+    texts = [str(c.get("comment_text") or "") for c in comments]
+    new = [(sha, subject) for sha, subject in commits
+           if not any(sha in text for text in texts)]
+    return {
+        "task": task, "read": len(comments), "total": len(commits), "new": new,
+        "linked": len(commits) - len(new),
+        "body": comment_body(title, new, base, style) if new else "",
+    }
+
+
+def default_title(ranges: list[str]) -> str:
+    return "Commits " + ", ".join(ranges)
+
+
+def load_links(path: str) -> tuple[dict, list[dict]]:
+    """(file-level options, entries) from a links spec. Rejects before any read."""
+    if not Path(path).is_file():
+        raise CommitsError(f"no such spec: {path}")
+    try:
+        spec = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except ValueError:
+        raise CommitsError(f"cannot read spec: {path} is not valid JSON.") from None
+
+    options: dict = {}
+    if isinstance(spec, dict) and isinstance(spec.get("links"), list):
+        for key in ("repo", "web_url"):
+            value = spec.get(key)
+            if value is not None and not isinstance(value, str):
+                raise CommitsError(f'spec "{key}" must be text.')
+            options[key] = value
+        entries = spec["links"]
+    elif isinstance(spec, list):
+        entries = spec
+    else:
+        raise CommitsError('spec must be a JSON array of entries, '
+                           'or an object with a "links" array.')
+    if not entries:
+        raise CommitsError("spec has no entries.")
+
+    links, seen = [], set()
+    for number, entry in enumerate(entries, start=1):
+        where = f"spec entry {number}"
+        if not isinstance(entry, dict):
+            raise CommitsError(f"{where}: must be an object.")
+        task = entry.get("task")
+        if not isinstance(task, str) or not task.strip():
+            raise CommitsError(f'{where}: "task" must be a task id.')
+        ranges = entry.get("ranges")
+        if (not isinstance(ranges, list) or not ranges
+                or not all(isinstance(r, str) and r.strip() for r in ranges)):
+            raise CommitsError(f'{where}: "ranges" must be a non-empty list of ranges.')
+        title = entry.get("title")
+        if title is not None and not isinstance(title, str):
+            raise CommitsError(f'{where}: "title" must be text.')
+        if task in seen:
+            raise CommitsError(f"{where}: task {task} appears more than once.")
+        seen.add(task)
+        links.append({"task": task, "ranges": list(ranges),
+                      "title": title or default_title(ranges)})
+    return options, links
+
+
+def print_body(body: str) -> None:
+    for line in body.split("\n"):
+        print(f"    {line}")
+
+
+def commits_single(api: ClickUp, args) -> int:
+    if not args.ranges:
+        print("commits needs at least one --range, e.g. --range v1.2.0..v1.3.0")
+        return 1
+    if args.apply:
+        print("--apply is for --spec. A single task posts unless --dry-run.")
+        return 1
+    repo = args.repo or "."
+    commits = resolve_commits(repo, args.ranges)
+    base, style = web_base(repo, args.web_url)
+    plan = plan_link(api, args.task_id, commits,
+                     args.title or default_title(args.ranges), base, style)
+
+    print(f"task {plan['task']}: {plan['read']} comment(s) read, "
+          f"{plan['total']} commit(s), {len(plan['new'])} new, "
+          f"{plan['linked']} already linked")
+    if not plan["new"]:
+        print("Nothing to do. Every commit is already linked.")
+        return 0
+    print()
+    print_body(plan["body"])
+
+    if args.dry_run:
+        print("\nDry run. Drop --dry-run to write.")
+        return 0
+
+    posted = api.add_comment(plan["task"], plan["body"], notify_all=False)
+    print(f"\ncommented  {plan['task']}  {len(plan['new'])} commit(s)  "
+          f"(comment {posted.get('id', '')})")
+    return 0
+
+
+def commits_spec(api: ClickUp, args) -> int:
+    if args.task_id or args.ranges or args.title:
+        print("--spec takes the task, --range and --title from the file. "
+              "Pass a task id or --spec, not both.")
+        return 1
+    if args.dry_run:
+        print("--spec is a dry run unless --apply. Drop --dry-run.")
+        return 1
+    options, links = load_links(args.spec)
+    repo = args.repo or options.get("repo") or "."
+    base, style = web_base(repo, args.web_url or options.get("web_url"))
+
+    # Every range resolves before any read, and every read before any write:
+    # a bad entry anywhere stops the run with the board untouched.
+    for link in links:
+        try:
+            link["commits"] = resolve_commits(repo, link["ranges"])
+        except CommitsError as error:
+            raise CommitsError(f"task {link['task']}: {error}") from None
+    plans = [plan_link(api, link["task"], link["commits"], link["title"], base, style)
+             for link in links]
+
+    posting = [p for p in plans if p["new"]]
+    print(f"spec: {len(plans)} task(s), {len(posting)} comment(s) to post, "
+          f"{len(plans) - len(posting)} task(s) already linked\n")
+    for plan in plans:
+        mark = "+" if plan["new"] else "="
+        print(f"  {mark} {plan['task']}  {len(plan['new'])} new, "
+              f"{plan['linked']} already linked")
+        for sha, subject in plan["new"]:
+            print(f"      {sha[:SHORT_SHA]} {subject}")
+
+    if not args.apply:
+        print("\nDry run. Re-run with --apply to write.")
+        return 0
+
+    if posting:
+        print()
+    for plan in posting:
+        posted = api.add_comment(plan["task"], plan["body"], notify_all=False)
+        print(f"commented  {plan['task']}  {len(plan['new'])} commit(s)  "
+              f"(comment {posted.get('id', '')})")
+    print(f"\nDone. {len(posting)} posted, {api.calls} API calls.")
+    return 0
+
+
+def cmd_commits(api: ClickUp, args) -> int:
+    """Post one comment of commit links per task, skipping commits already linked."""
+    try:
+        if args.spec:
+            return commits_spec(api, args)
+        if not args.task_id:
+            print("commits needs a task id, or --spec for several tasks.")
+            return 1
+        return commits_single(api, args)
+    except CommitsError as error:
+        print(str(error))
+        return 1
+
+
 def cmd_show(api: ClickUp, args) -> int:
     for task in sorted(api.list_tasks(args.list), key=lambda t: t["name"]):
         parent = f"  parent={task['parent']}" if task.get("parent") else ""
@@ -445,6 +734,24 @@ def build_parser() -> argparse.ArgumentParser:
     add_list.add_argument("--content", help="the list's description")
     add_list.add_argument("--dry-run", action="store_true")
     add_list.set_defaults(func=cmd_add_list)
+
+    commits = sub.add_parser(
+        "commits", help="link git commits to a task as one comment of web links")
+    commits.add_argument("task_id", nargs="?")
+    commits.add_argument("--range", action="append", dest="ranges", metavar="A..B",
+                         help="git revision range; repeat for several")
+    commits.add_argument("--spec", metavar="FILE",
+                         help="JSON file of {task, ranges, title} entries")
+    commits.add_argument("--repo", metavar="PATH",
+                         help="git repository to read (default: current dir)")
+    commits.add_argument("--web-url", metavar="URL",
+                         help="repository web address, when origin cannot say")
+    commits.add_argument("--title", help="first line of the comment")
+    commits.add_argument("--dry-run", action="store_true",
+                         help="single task: show the comment, post nothing")
+    commits.add_argument("--apply", action="store_true",
+                         help="--spec: post; without it this is a dry run")
+    commits.set_defaults(func=cmd_commits)
 
     show = sub.add_parser("show", help="print what is on a list")
     show.add_argument("--list", required=True, metavar="LIST_ID")

@@ -17,7 +17,10 @@ Set-StrictMode -Version 2.0
 # ConvertTo-EpochMs, New-ClickUpTaskBody - so the harness exercises the real
 # parsing rather than a second copy of it. Only the data-returning functions
 # below are faked; they shadow the real ones in this module's export set.
-if ($env:PARITY_REAL_MODULE) { Import-Module $env:PARITY_REAL_MODULE -Force }
+$script:RealModule = $null
+if ($env:PARITY_REAL_MODULE) {
+    $script:RealModule = Import-Module $env:PARITY_REAL_MODULE -Force -PassThru
+}
 
 $script:Here = $PSScriptRoot
 $script:FixturePath = $env:PARITY_FIXTURE
@@ -331,6 +334,101 @@ function Resolve-ClickUpAssignees {
         $resolved += [int]$match[0].id
     }
     return $resolved
+}
+
+
+# -- comments, faked at the HTTP layer ---------------------------------------
+#
+# Get-ClickUpComments and Add-ClickUpComment are NOT shadowed. The real ones
+# run, and their Invoke-ClickUp is swapped for Invoke-MockHttp inside the real
+# module's own scope, so the pagination loop under test is the shipped one.
+# The Python mock does the same by overriding _call.
+
+$script:CommentPage = 25
+
+function Get-MockComments {
+    <#.SYNOPSIS Newest first: what this run posted, then the fixture's history.#>
+    param([string]$TaskId)
+    $state = Get-State
+    $posted = @(@(Get-Member2 $state 'comments' @()) | Where-Object { $_.task -eq $TaskId })
+    $rows = @()
+    for ($i = $posted.Count - 1; $i -ge 0; $i--) {
+        $c = $posted[$i]
+        $rows += ,([pscustomobject]@{ id = $c.id; date = $c.date; comment_text = $c.comment_text })
+    }
+    $history = Get-Member2 (Get-Fixture) 'comments'
+    $rows += @(Get-Member2 $history $TaskId @())
+    return $rows
+}
+
+
+function Get-MockCommentPage {
+    param([string]$TaskId, $Query)
+    $rows = @(Get-MockComments -TaskId $TaskId)
+    if ($Query.Count -eq 0) { return @($rows | Select-Object -First $script:CommentPage) }
+    # The real API wants both halves of the cursor. Insist on it, so a client
+    # that sends only one is caught here rather than on a live board.
+    $keys = (@($Query.Keys) | Sort-Object) -join ','
+    if ($keys -ne 'start,start_id') {
+        throw "mock: comment cursor needs start and start_id, got $keys"
+    }
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+        if ([string]$rows[$i].id -ne $Query['start_id']) { continue }
+        if ([string]$rows[$i].date -ne $Query['start']) {
+            throw "mock: start does not match start_id's date"
+        }
+        return @($rows | Select-Object -Skip ($i + 1) -First $script:CommentPage)
+    }
+    throw ("mock: no comment {0}" -f $Query['start_id'])
+}
+
+
+function Add-MockComment {
+    param([string]$TaskId, $Body)
+    $state = Get-State
+    $n = [int]$state.n + 1
+    $id = 'cm{0:D2}' -f $n
+    $date = [string](1800000000000 + $n)
+    if ($state.PSObject.Properties.Name -notcontains 'comments') {
+        $state | Add-Member -NotePropertyName comments -NotePropertyValue @()
+    }
+    $state.comments = @(@($state.comments) + @([pscustomobject]@{
+        id = $id; task = $TaskId; date = $date
+        comment_text = $Body['comment_text']; notify_all = [bool]$Body['notify_all'] }))
+    $state.n = $n
+    Save-State -State $state
+    return [pscustomobject]@{ id = $id; hist_id = "h$id"; date = [long]$date }
+}
+
+
+function Invoke-MockHttp {
+    <#.SYNOPSIS Serve the comment endpoints; refuse everything else.#>
+    param($Method, $Path, $Body = $null, [int]$Retries = 2)
+    $parts = $Path -split '\?', 2
+    $match = [regex]::Match($parts[0], '^/task/([^/]+)/comment$')
+    if (-not $match.Success) { throw "mock leaked a real call: $Method $Path" }
+    $script:Calls++
+    $taskId = $match.Groups[1].Value
+    if ($Method -eq 'GET') {
+        $query = [ordered]@{}
+        if ($parts.Count -gt 1 -and $parts[1]) {
+            foreach ($pair in ($parts[1] -split '&')) {
+                $kv = $pair -split '=', 2
+                $query[[uri]::UnescapeDataString($kv[0])] = [uri]::UnescapeDataString($kv[1])
+            }
+        }
+        return [pscustomobject]@{ comments = @(Get-MockCommentPage -TaskId $taskId -Query $query) }
+    }
+    if ($Method -eq 'POST') { return (Add-MockComment -TaskId $taskId -Body $Body) }
+    throw "mock has no $Method for comments"
+}
+
+
+if ($script:RealModule) {
+    & $script:RealModule {
+        param($Handler)
+        Set-Item -Path function:script:Invoke-ClickUp -Value $Handler
+    } ${function:Invoke-MockHttp}
 }
 
 

@@ -49,6 +49,9 @@ os.environ["PARITY_REAL_MODULE"] = str(SCRIPTS / "ClickUp.psm1")
 def scenarios() -> list[dict]:
     spec = str(FIXTURES / "spec.json")
     recon = str(FIXTURES / "reconcile.json")
+    links = str(FIXTURES / "links.json")
+    links_invalid = str(FIXTURES / "links-invalid.json")
+    links_badrange = str(FIXTURES / "links-badrange.json")
     return [
         {"name": "tree", "tool": "reader",
          "steps": [(["tree"], ["tree"])]},
@@ -217,10 +220,173 @@ def scenarios() -> list[dict]:
              (["apply", spec, "--apply"], ["apply", spec, "-Apply"]),
              (["apply", spec, "--apply"], ["apply", spec, "-Apply"]),
          ]},
+
+        # -- commits: a real git repo (see GIT_COMMITS), mocked comments ----
+
+        {"name": "commits: dry run posts nothing", "tool": "scribe", "git": True,
+         "steps": [(["commits", "t1", "--range", "base..v1", "--repo", "repo",
+                     "--dry-run"],
+                    ["commits", "t1", "-Range", "base..v1", "-Repo", "repo",
+                     "-DryRun"])]},
+
+        {"name": "commits: post, then re-run is a no-op", "tool": "scribe",
+         "git": True,
+         "steps": [
+             (["commits", "t1", "--range", "base..v1", "--repo", "repo"],
+              ["commits", "t1", "-Range", "base..v1", "-Repo", "repo"]),
+             (["commits", "t1", "--range", "base..v1", "--repo", "repo"],
+              ["commits", "t1", "-Range", "base..v1", "-Repo", "repo"]),
+         ]},
+
+        {"name": "commits: partly linked posts only the missing", "tool": "scribe",
+         "git": True,
+         "steps": [
+             (["commits", "t2", "--range", "base..v1", "--repo", "repo"],
+              ["commits", "t2", "-Range", "base..v1", "-Repo", "repo"]),
+             # Overlapping ranges, deduplicated; two of four already linked.
+             (["commits", "t2", "--range", "base..v1", "--range", "base..v2",
+               "--repo", "repo", "--title", "Export, continued"],
+              ["commits", "t2", "-Range", "base..v1,base..v2",
+               "-Repo", "repo", "-Title", "Export, continued"]),
+         ]},
+
+        {"name": "commits: a SHA on an old comment page counts", "tool": "scribe",
+         "git": True,
+         "steps": [(["commits", "t4", "--range", "base..v1", "--repo", "repo"],
+                    ["commits", "t4", "-Range", "base..v1", "-Repo", "repo"])]},
+
+        {"name": "commits: spec dry run, apply, then converged", "tool": "scribe",
+         "git": True,
+         "steps": [
+             (["commits", "--spec", links], ["commits", "-Spec", links]),
+             (["commits", "--spec", links, "--apply"],
+              ["commits", "-Spec", links, "-Apply"]),
+             (["commits", "--spec", links, "--apply"],
+              ["commits", "-Spec", links, "-Apply"]),
+         ]},
+
+        {"name": "commits: malformed spec rejected", "tool": "scribe", "git": True,
+         "steps": [(["commits", "--spec", links_invalid, "--repo", "repo", "--apply"],
+                    ["commits", "-Spec", links_invalid, "-Repo", "repo", "-Apply"])]},
+
+        {"name": "commits: one bad range stops the whole spec", "tool": "scribe",
+         "git": True,
+         "steps": [(["commits", "--spec", links_badrange, "--repo", "repo",
+                     "--apply"],
+                    ["commits", "-Spec", links_badrange, "-Repo", "repo",
+                     "-Apply"])]},
+
+        {"name": "commits: bad and empty ranges", "tool": "scribe", "git": True,
+         "steps": [
+             (["commits", "t1", "--range", "nope..v1", "--repo", "repo"],
+              ["commits", "t1", "-Range", "nope..v1", "-Repo", "repo"]),
+             (["commits", "t1", "--range", "v1..v1", "--repo", "repo"],
+              ["commits", "t1", "-Range", "v1..v1", "-Repo", "repo"]),
+             (["commits", "t1", "--range=--output=x", "--repo", "repo"],
+              ["commits", "t1", "-Range", "--output=x", "-Repo", "repo"]),
+         ]},
+
+        {"name": "commits: argument errors", "tool": "scribe", "git": True,
+         "steps": [
+             (["commits", "t1", "--repo", "repo"], ["commits", "t1", "-Repo", "repo"]),
+             (["commits", "--repo", "repo"], ["commits", "-Repo", "repo"]),
+             (["commits", "t1", "--spec", links],
+              ["commits", "t1", "-Spec", links]),
+             (["commits", "--spec", links, "--dry-run"],
+              ["commits", "-Spec", links, "-DryRun"]),
+         ]},
+
+        {"name": "commits: unknown host needs --web-url", "tool": "scribe",
+         "git": True, "remote": "git@git.example.com:acme/widgets.git",
+         "steps": [
+             (["commits", "t1", "--range", "base..v1", "--repo", "repo",
+               "--dry-run"],
+              ["commits", "t1", "-Range", "base..v1", "-Repo", "repo", "-DryRun"]),
+             (["commits", "t1", "--range", "base..v1", "--repo", "repo",
+               "--web-url", "https://git.example.com/acme/widgets/", "--dry-run"],
+              ["commits", "t1", "-Range", "base..v1", "-Repo", "repo",
+               "-WebUrl", "https://git.example.com/acme/widgets/", "-DryRun"]),
+         ]},
+
+        {"name": "commits: github https remote", "tool": "scribe", "git": True,
+         "remote": "https://deploy@github.com/acme/widgets.git",
+         "steps": [(["commits", "t1", "--range", "v1..v2", "--repo", "repo",
+                     "--dry-run"],
+                    ["commits", "t1", "-Range", "v1..v2", "-Repo", "repo",
+                     "-DryRun"])]},
+
+        {"name": "commits: gitlab ssh remote with a port", "tool": "scribe",
+         "git": True, "remote": "ssh://git@gitlab.example.com:2222/acme/widgets.git",
+         "steps": [(["commits", "t1", "--range", "v1..v2", "--repo", "repo",
+                     "--dry-run"],
+                    ["commits", "t1", "-Range", "v1..v2", "-Repo", "repo",
+                     "-DryRun"])]},
     ]
 
 
 # --------------------------------------------------------------------------
+
+# The `commits` scenarios read a real git repository. Every input to a commit
+# hash is pinned - author, committer, both dates, message, content - so the
+# SHAs are the same on every machine, and the fixture's comments can quote
+# them. Change anything here and the SHAs in board.json's "comments" move.
+GIT_COMMITS = [
+    ("Initial import", "base"),
+    ("Add payroll export", None),
+    ("Fix cutoff rounding", "v1"),
+    ("Document the export", None),
+    ("Release the export", "v2"),
+]
+DEFAULT_REMOTE = "git@bitbucket.org:acme/widgets.git"
+_GIT_TEMPLATE: Path | None = None
+
+
+def git_env() -> dict:
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "Parity", "GIT_AUTHOR_EMAIL": "parity@example.com",
+        "GIT_COMMITTER_NAME": "Parity", "GIT_COMMITTER_EMAIL": "parity@example.com",
+        # The developer's own config - signing, hooks, autocrlf - must not
+        # reach the fixture, or the hashes stop being reproducible.
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+    })
+    return env
+
+
+def git_template() -> Path:
+    """Build the fixture repository once; each sandbox gets a copy."""
+    global _GIT_TEMPLATE
+    if _GIT_TEMPLATE is not None:
+        return _GIT_TEMPLATE
+    repo = Path(tempfile.mkdtemp(prefix="parity-git-")) / "repo"
+    repo.mkdir()
+    env = git_env()
+
+    def git(*args: str, date: str | None = None) -> None:
+        extra = {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {}
+        subprocess.run(["git", "-C", str(repo), *args], check=True,
+                       capture_output=True, env={**env, **extra})
+
+    git("init", "-q")
+    git("remote", "add", "origin", DEFAULT_REMOTE)
+    for day, (subject, tag) in enumerate(GIT_COMMITS, start=1):
+        (repo / f"{day}.txt").write_bytes(f"{subject}\n".encode())
+        git("add", f"{day}.txt")
+        git("commit", "-q", "-m", subject, date=f"2026-01-0{day}T00:00:00+0000")
+        if tag:
+            git("tag", tag)
+    _GIT_TEMPLATE = repo
+    return repo
+
+
+def add_git_repo(path: Path, remote: str | None) -> None:
+    """Copy the fixture repository into a sandbox, pointing origin at `remote`."""
+    target = path / "repo"
+    shutil.copytree(git_template(), target)
+    subprocess.run(["git", "-C", str(target), "remote", "set-url", "origin",
+                    remote or DEFAULT_REMOTE],
+                   check=True, capture_output=True, env=git_env())
+
 
 def powershell() -> str | None:
     for candidate in ("pwsh", "powershell"):
@@ -229,9 +395,11 @@ def powershell() -> str | None:
     return None
 
 
-def sandbox(kind: str) -> Path:
+def sandbox(kind: str, scenario: dict | None = None) -> Path:
     """A temp dir holding the real script beside the mock client."""
     path = Path(tempfile.mkdtemp(prefix=f"parity-{kind}-"))
+    if scenario and scenario.get("git"):
+        add_git_repo(path, scenario.get("remote"))
     if kind == "py":
         shutil.copy(MOCKS / "clickup_client.py", path)
         for script in ("scribe.py", "reader.py", "setup.py"):
@@ -361,7 +529,7 @@ def main() -> int:
     for scenario in scenarios():
         tool = scenario["tool"]
         as_json = scenario.get("json", False)
-        py_dir, ps_dir = sandbox("py"), sandbox("ps")
+        py_dir, ps_dir = sandbox("py", scenario), sandbox("ps", scenario)
         problems: list[str] = []
         last = ("", "")
 
@@ -395,6 +563,9 @@ def main() -> int:
                     print(f"         | {line}")
         else:
             print(f"  [OK]   {scenario['name']}")
+
+    if _GIT_TEMPLATE is not None:
+        shutil.rmtree(_GIT_TEMPLATE.parent, ignore_errors=True)
 
     total = len(scenarios())
     print(f"\n{total - failures}/{total} scenarios match.")

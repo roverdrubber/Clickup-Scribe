@@ -25,6 +25,9 @@ $script:Calls = 0
 $script:LastCall = [DateTime]::MinValue
 $script:PaceMs = 150
 
+# GET /task/{id}/comment returns at most this many per page.
+$script:CommentPage = 25
+
 # Windows PowerShell 5.1 negotiates SSL3/TLS1.0 by default, which ClickUp
 # refuses. Without this the very first call dies with a connection error that
 # looks like a network fault rather than a protocol mismatch.
@@ -434,6 +437,48 @@ function Get-ClickUpTask {
 }
 
 
+function Get-ClickUpComments {
+    <#
+    .SYNOPSIS
+        Every comment on a task, newest first, following pagination to the end.
+    .DESCRIPTION
+        The endpoint returns the newest 25 only. Older ones need start (the
+        oldest received comment's date) and start_id (its id) together.
+        Stopping at the first page silently forgets old comments, which turns
+        an "already linked" check into a duplicate post.
+    #>
+    param([Parameter(Mandatory)][string]$TaskId)
+
+    $comments = New-Object System.Collections.ArrayList
+    $seen = @{}
+    $query = ''
+    while ($true) {
+        $payload = Invoke-ClickUp -Method GET -Path "/task/$TaskId/comment$query"
+        $batch = @()
+        if ($null -ne $payload -and
+            $payload.PSObject.Properties.Name -contains 'comments' -and $payload.comments) {
+            $batch = @($payload.comments)
+        }
+        $fresh = 0
+        foreach ($comment in $batch) {
+            $key = [string]$comment.id
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+            [void]$comments.Add($comment)
+            $fresh++
+        }
+        # A short page is the last one. A page with nothing new means the
+        # cursor did not move; stopping beats looping forever.
+        if ($batch.Count -lt $script:CommentPage -or $fresh -eq 0) { break }
+        $oldest = $batch[$batch.Count - 1]
+        $query = '?start={0}&start_id={1}' -f
+                 [uri]::EscapeDataString([string]$oldest.date),
+                 [uri]::EscapeDataString([string]$oldest.id)
+    }
+    return $comments.ToArray()
+}
+
+
 # -- hierarchy --------------------------------------------------------------
 #
 # ClickUp's own vocabulary, which the UI hides: a Workspace is a "team" in the
@@ -615,6 +660,18 @@ function Remove-ClickUpTask {
 }
 
 
+function Add-ClickUpComment {
+    <#.SYNOPSIS Post a plain-text comment. Returns id, hist_id, date.#>
+    param(
+        [Parameter(Mandatory)][string]$TaskId,
+        [Parameter(Mandatory)][string]$Text,
+        [bool]$NotifyAll = $false
+    )
+    $body = @{ comment_text = $Text; notify_all = $NotifyAll }
+    return Invoke-ClickUp -Method POST -Path "/task/$TaskId/comment" -Body $body
+}
+
+
 function Set-ClickUpTask {
     param(
         [Parameter(Mandatory)][string]$TaskId,
@@ -631,4 +688,5 @@ Export-ModuleMember -Function Invoke-ClickUp, Get-ClickUpTasks, Get-ClickUpList,
     Get-ClickUpFolders, Get-ClickUpFolderlessLists, Get-ClickUpFolderLists,
     Remove-ClickUpTask, Get-ClickUpMembers, Resolve-ClickUpAssignees,
     New-ClickUpTaskBody, ConvertTo-Priority, ConvertTo-EpochMs,
-    New-ClickUpFolder, New-ClickUpList, Get-ClickUpDrift
+    New-ClickUpFolder, New-ClickUpList, Get-ClickUpDrift,
+    Get-ClickUpComments, Add-ClickUpComment

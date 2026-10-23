@@ -19,6 +19,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
+import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -36,7 +38,7 @@ RateLimited = _real.RateLimited
 # Forward the module-level surface. Shadowing the real module means anything
 # not re-exported here vanishes for callers, which shows up as an ImportError
 # rather than as a behaviour difference.
-for _name in ("PRIORITIES", "parse_priority", "parse_date",
+for _name in ("PRIORITIES", "COMMENT_PAGE", "parse_priority", "parse_date",
               "token_path", "token_source", "find_token"):
     globals()[_name] = getattr(_real, _name)
 
@@ -55,6 +57,46 @@ def _save(state: dict) -> None:
     STATE.write_text(json.dumps(state, indent=2, sort_keys=True))
 
 
+PAGE = 25
+
+
+def _all_comments(task_id: str) -> list[dict]:
+    """Newest first: what this run posted, then the fixture's history."""
+    posted = [c for c in _state().get("comments", []) if c["task"] == task_id]
+    rows = [{"id": c["id"], "date": c["date"], "comment_text": c["comment_text"]}
+            for c in reversed(posted)]
+    return rows + list(_fixture().get("comments", {}).get(task_id, []))
+
+
+def _comment_page(task_id: str, query: dict) -> list[dict]:
+    rows = _all_comments(task_id)
+    if not query:
+        return rows[:PAGE]
+    # The real API wants both halves of the cursor. Insist on it, so a client
+    # that sends only one is caught here rather than on a live board.
+    if set(query) != {"start", "start_id"}:
+        raise ClickUpError(f"mock: comment cursor needs start and start_id, got {sorted(query)}")
+    for index, row in enumerate(rows):
+        if row["id"] == query["start_id"]:
+            if str(row["date"]) != query["start"]:
+                raise ClickUpError("mock: start does not match start_id's date")
+            return rows[index + 1:index + 1 + PAGE]
+    raise ClickUpError(f"mock: no comment {query['start_id']}")
+
+
+def _post_comment(task_id: str, body: dict) -> dict:
+    state = _state()
+    state["n"] += 1
+    comment_id = f"cm{state['n']:02d}"
+    date = str(1800000000000 + state["n"])
+    state.setdefault("comments", []).append({
+        "id": comment_id, "task": task_id, "date": date,
+        "comment_text": body["comment_text"], "notify_all": body["notify_all"],
+    })
+    _save(state)
+    return {"id": comment_id, "hist_id": f"h{comment_id}", "date": int(date)}
+
+
 class ClickUp(_real.ClickUp):
     def __init__(self, token: str | None = None, pace: float = 0.0) -> None:
         self.token = "pk_mock"
@@ -63,7 +105,24 @@ class ClickUp(_real.ClickUp):
         self._last = 0.0
 
     def _call(self, method, path, body=None, _retries=2):
-        raise AssertionError(f"mock leaked a real call: {method} {path}")
+        """Serve the comment endpoints at the HTTP layer; refuse everything else.
+
+        Comments are faked here rather than by overriding get_comments, so the
+        real pagination loop - cursor, page size, stop condition - is what
+        runs. The PowerShell mock does the same to Invoke-ClickUp.
+        """
+        parts = urllib.parse.urlsplit(path)
+        match = re.fullmatch(r"/task/([^/]+)/comment", parts.path)
+        if not match:
+            raise AssertionError(f"mock leaked a real call: {method} {path}")
+        self.calls += 1
+        task_id = match.group(1)
+        if method == "GET":
+            query = dict(urllib.parse.parse_qsl(parts.query))
+            return {"comments": _comment_page(task_id, query)}
+        if method == "POST":
+            return _post_comment(task_id, body)
+        raise AssertionError(f"mock has no {method} for comments")
 
     # -- reads ------------------------------------------------------------
 

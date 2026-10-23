@@ -1,0 +1,7 @@
+{
+  "repo": "repo",
+  "links": [
+    { "task": "t1", "ranges": ["base..v1"] },
+    { "task": "t4", "ranges": ["base..v2"], "title": "Shipped the export" }
+  ]
+}

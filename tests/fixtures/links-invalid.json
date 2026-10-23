@@ -1,0 +1,4 @@
+[
+  { "task": "t1", "ranges": ["base..v1"] },
+  { "task": "t2", "ranges": [] }
+]

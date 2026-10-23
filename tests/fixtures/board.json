@@ -137,5 +137,165 @@
       "username": "Raymart Amoranto",
       "email": "ray@example.com"
     }
-  ]
+  ],
+  "comments": {
+    "_comment": "Per task, newest first, as GET /task/{id}/comment returns them. t4 runs past one 25-comment page; only its oldest comment links a commit.",
+    "t4": [
+      {
+        "id": "9031",
+        "date": "1767227460000",
+        "comment_text": "Progress note 31."
+      },
+      {
+        "id": "9030",
+        "date": "1767227400000",
+        "comment_text": "Progress note 30."
+      },
+      {
+        "id": "9029",
+        "date": "1767227340000",
+        "comment_text": "Progress note 29."
+      },
+      {
+        "id": "9028",
+        "date": "1767227280000",
+        "comment_text": "Progress note 28."
+      },
+      {
+        "id": "9027",
+        "date": "1767227220000",
+        "comment_text": "Progress note 27."
+      },
+      {
+        "id": "9026",
+        "date": "1767227160000",
+        "comment_text": "Progress note 26."
+      },
+      {
+        "id": "9025",
+        "date": "1767227100000",
+        "comment_text": "Progress note 25."
+      },
+      {
+        "id": "9024",
+        "date": "1767227040000",
+        "comment_text": "Progress note 24."
+      },
+      {
+        "id": "9023",
+        "date": "1767226980000",
+        "comment_text": "Progress note 23."
+      },
+      {
+        "id": "9022",
+        "date": "1767226920000",
+        "comment_text": "Progress note 22."
+      },
+      {
+        "id": "9021",
+        "date": "1767226860000",
+        "comment_text": "Progress note 21."
+      },
+      {
+        "id": "9020",
+        "date": "1767226800000",
+        "comment_text": "Reviewed 2ae44065 - a short SHA is not a link."
+      },
+      {
+        "id": "9019",
+        "date": "1767226740000",
+        "comment_text": "Progress note 19."
+      },
+      {
+        "id": "9018",
+        "date": "1767226680000",
+        "comment_text": "Progress note 18."
+      },
+      {
+        "id": "9017",
+        "date": "1767226620000",
+        "comment_text": "Progress note 17."
+      },
+      {
+        "id": "9016",
+        "date": "1767226560000",
+        "comment_text": "Progress note 16."
+      },
+      {
+        "id": "9015",
+        "date": "1767226500000",
+        "comment_text": "Progress note 15."
+      },
+      {
+        "id": "9014",
+        "date": "1767226440000",
+        "comment_text": "Progress note 14."
+      },
+      {
+        "id": "9013",
+        "date": "1767226380000",
+        "comment_text": "Progress note 13."
+      },
+      {
+        "id": "9012",
+        "date": "1767226320000",
+        "comment_text": "Progress note 12."
+      },
+      {
+        "id": "9011",
+        "date": "1767226260000",
+        "comment_text": "Progress note 11."
+      },
+      {
+        "id": "9010",
+        "date": "1767226200000",
+        "comment_text": "Progress note 10."
+      },
+      {
+        "id": "9009",
+        "date": "1767226140000",
+        "comment_text": "Progress note 9."
+      },
+      {
+        "id": "9008",
+        "date": "1767226080000",
+        "comment_text": "Progress note 8."
+      },
+      {
+        "id": "9007",
+        "date": "1767226020000",
+        "comment_text": "Progress note 7."
+      },
+      {
+        "id": "9006",
+        "date": "1767225960000",
+        "comment_text": "Progress note 6."
+      },
+      {
+        "id": "9005",
+        "date": "1767225900000",
+        "comment_text": "Progress note 5."
+      },
+      {
+        "id": "9004",
+        "date": "1767225840000",
+        "comment_text": "Progress note 4."
+      },
+      {
+        "id": "9003",
+        "date": "1767225780000",
+        "comment_text": "Progress note 3."
+      },
+      {
+        "id": "9002",
+        "date": "1767225720000",
+        "comment_text": "Progress note 2."
+      },
+      {
+        "id": "9001",
+        "date": "1767225660000",
+        "comment_text": "Commits base..v0\n\n53915bad Add payroll export\nhttps://bitbucket.org/acme/widgets/commits/53915badbd1336e55b9d6e7aec7637d645d57ad5"
+      }
+    ]
+  }
 }

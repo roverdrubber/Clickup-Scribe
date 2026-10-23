@@ -25,16 +25,20 @@
 .EXAMPLE
     .\scribe.ps1 show -List 901615936216
     .\scribe.ps1 statuses -List 901615936216
+
+.EXAMPLE
+    .\scribe.ps1 commits 86d44avm2 -Range v1.2.0..v1.3.0 -DryRun
+    .\scribe.ps1 commits -Spec links.json -Apply
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
     [ValidateSet('add', 'set', 'apply', 'delete', 'add-folder', 'add-list',
-                 'show', 'statuses')]
+                 'show', 'statuses', 'commits')]
     [string]$Command,
 
-    # Task id for `set`, spec path for `apply`.
+    # Task id for `set` and `commits`, spec path for `apply`.
     [Parameter(Position = 1)]
     [string]$Target,
 
@@ -52,6 +56,13 @@ param(
     [string]$Start,
     [int]$Estimate,
     [string[]]$Tag,
+    # `commits`: revision ranges (repeat as -Range a..b,c..d), the repository,
+    # its web address, the comment title, and a links spec.
+    [string[]]$Range,
+    [string]$Repo,
+    [string]$WebUrl,
+    [string]$Title,
+    [string]$Spec,
     [switch]$AllowDuplicate,
     [switch]$DryRun,
     [switch]$Apply,
@@ -466,6 +477,454 @@ function Invoke-Delete {
 }
 
 
+# ---------------------------------------------------------------------------
+# commits: git history as task comments
+# ---------------------------------------------------------------------------
+#
+# ClickUp's API has no endpoint for the integration panel's commit links, so
+# commits are recorded as a comment of web links instead. The full SHA in the
+# comment text is the idempotency key: a commit whose SHA already appears in
+# any comment on the task is never posted again.
+#
+# A request that cannot go ahead throws 'COMMITS:<message>'; Invoke-Commits
+# prints the message and exits 1, with nothing written.
+
+$script:ShortSha = 8
+# https://host/org/repo, ssh://git@host:22/org/repo, user@host:org/repo.
+$script:UrlRemote = '^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]+@)?([^/:]+)(?::[0-9]+)?/(.+)$'
+$script:ScpRemote = '^(?:[^@/]+@)?([^:/]+):(.+)$'
+
+
+function Stop-Commits {
+    param([string]$Message)
+    throw ('COMMITS:' + $Message)
+}
+
+
+function Get-CommitsMessage {
+    <#.SYNOPSIS The message of a Stop-Commits error, or $null for any other.#>
+    param($ErrorRecord)
+    $message = $ErrorRecord.Exception.Message
+    if ($message -like 'COMMITS:*') { return $message.Substring(8) }
+    return $null
+}
+
+
+function ConvertTo-ProcessArgument {
+    <#.SYNOPSIS Quote one argument for ProcessStartInfo.Arguments.#>
+    param([string]$Value)
+    if ($Value -ne '' -and $Value -notmatch '[\s"]') { return $Value }
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+
+function Invoke-Git {
+    <#
+    .SYNOPSIS
+        Run git against a repository; its first stderr line becomes the error.
+    .DESCRIPTION
+        A Process rather than `& git`: Windows PowerShell 5.1 turns a native
+        command's stderr into an error record, which under
+        ErrorActionPreference Stop throws before the exit code can be read,
+        and decodes stdout with the console code page rather than UTF-8.
+    #>
+    param([string]$RepoPath, [string[]]$Arguments)
+    $all = @('-C', $RepoPath) + $Arguments
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = 'git'
+    $psi.Arguments = (@($all | ForEach-Object { ConvertTo-ProcessArgument $_ }) -join ' ')
+    # Set-Location does not move the process directory; a relative -Repo
+    # must resolve against the one the user is looking at.
+    $psi.WorkingDirectory = (Get-Location).ProviderPath
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+
+    $process = $null
+    try { $process = [System.Diagnostics.Process]::Start($psi) } catch { }
+    if ($null -eq $process) { Stop-Commits 'git is not on PATH.' }
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    $out = $stdout.Result
+
+    if ($process.ExitCode -ne 0) {
+        $lines = @($stderr -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($lines.Count -gt 0) { Stop-Commits $lines[0] }
+        Stop-Commits ("git exited {0}" -f $process.ExitCode)
+    }
+    return $out
+}
+
+
+function Resolve-Commits {
+    <#.SYNOPSIS @{Sha; Subject} oldest first, ranges in the order given, no repeats.#>
+    param([string]$RepoPath, [string[]]$Ranges)
+    $commits = New-Object System.Collections.ArrayList
+    $seen = @{}
+    foreach ($rangeText in $Ranges) {
+        # A leading dash would reach git as an option, not a revision.
+        if (-not $rangeText -or $rangeText.StartsWith('-')) {
+            Stop-Commits ("'{0}' is not a revision range." -f $rangeText)
+        }
+        try {
+            # The trailing -- stops git reading a range as a file path.
+            $out = Invoke-Git -RepoPath $RepoPath -Arguments @(
+                'log', '--reverse', '--no-merges', '--format=%H%x09%s', $rangeText, '--')
+        } catch {
+            $why = Get-CommitsMessage $_
+            if ($null -eq $why) { throw }
+            Stop-Commits ("git log failed for range '{0}': {1}" -f $rangeText, $why)
+        }
+        $found = 0
+        foreach ($line in ($out -split "`n")) {
+            $line = $line.TrimEnd([char]13)
+            if (-not $line) { continue }
+            $tab = $line.IndexOf("`t")
+            $sha = $line
+            $subject = ''
+            if ($tab -ge 0) {
+                $sha = $line.Substring(0, $tab)
+                $subject = $line.Substring($tab + 1)
+            }
+            $found++
+            if (-not $seen.ContainsKey($sha)) {
+                $seen[$sha] = $true
+                [void]$commits.Add(@{ Sha = $sha; Subject = $subject })
+            }
+        }
+        if ($found -eq 0) { Stop-Commits ("range '{0}' contains no commits." -f $rangeText) }
+    }
+    return $commits.ToArray()
+}
+
+
+function ConvertFrom-Remote {
+    <#.SYNOPSIS @{HostName; Path} from any remote spelling, or $null.#>
+    param([string]$Url)
+    $text = $Url.Trim()
+    $match = [regex]::Match($text, $script:UrlRemote)
+    if (-not $match.Success) { $match = [regex]::Match($text, $script:ScpRemote) }
+    if (-not $match.Success) { return $null }
+    $path = $match.Groups[2].Value.TrimEnd('/')
+    if ($path.EndsWith('.git')) { $path = $path.Substring(0, $path.Length - 4) }
+    return @{ HostName = $match.Groups[1].Value.ToLower(); Path = $path }
+}
+
+
+function Get-CommitPath {
+    <#.SYNOPSIS The per-commit path segment each forge uses, or $null for an unknown one.#>
+    param([string]$HostName)
+    if ($HostName -eq 'bitbucket.org') { return '/commits/' }
+    if ($HostName -eq 'github.com') { return '/commit/' }
+    if ($HostName.Contains('gitlab')) { return '/-/commit/' }
+    return $null
+}
+
+
+function Get-WebBase {
+    <#.SYNOPSIS @{Base; Style} from -WebUrl or the origin remote.#>
+    param([string]$RepoPath, [string]$Url)
+    if ($Url) {
+        $match = [regex]::Match($Url.Trim(), $script:UrlRemote)
+        if (-not $match.Success) {
+            Stop-Commits ("-WebUrl '{0}' is not a URL. Use the repository's web address, https://..." -f $Url)
+        }
+        $base = $Url.Trim().TrimEnd('/')
+        if ($base.EndsWith('.git')) { $base = $base.Substring(0, $base.Length - 4) }
+        $style = Get-CommitPath $match.Groups[1].Value.ToLower()
+        if (-not $style) { $style = '/commit/' }
+        return @{ Base = $base; Style = $style }
+    }
+
+    $remote = $null
+    try {
+        $remote = (Invoke-Git -RepoPath $RepoPath -Arguments @('remote', 'get-url', 'origin')).Trim()
+    } catch {
+        if ($null -eq (Get-CommitsMessage $_)) { throw }
+        Stop-Commits "cannot read the 'origin' remote. Pass -WebUrl with the repository's web address."
+    }
+    $parsed = ConvertFrom-Remote $remote
+    if ($null -eq $parsed) {
+        Stop-Commits ("cannot read the 'origin' remote '{0}'. Pass -WebUrl with the repository's web address." -f $remote)
+    }
+    $style = Get-CommitPath $parsed.HostName
+    if (-not $style) {
+        Stop-Commits ("unknown git host '{0}'. Pass -WebUrl with the repository's web address." -f $parsed.HostName)
+    }
+    return @{ Base = ('https://{0}/{1}' -f $parsed.HostName, $parsed.Path); Style = $style }
+}
+
+
+function Get-ShortSha {
+    param([string]$Sha)
+    return $Sha.Substring(0, [Math]::Min($script:ShortSha, $Sha.Length))
+}
+
+
+function New-CommentBody {
+    param([string]$CommentTitle, $Commits, $Web)
+    $blocks = @($CommentTitle)
+    foreach ($commit in $Commits) {
+        $blocks += ("{0} {1}`n{2}{3}{4}" -f (Get-ShortSha $commit.Sha), $commit.Subject,
+                    $Web.Base, $Web.Style, $commit.Sha)
+    }
+    return ($blocks -join "`n`n")
+}
+
+
+function Get-LinkPlan {
+    <#.SYNOPSIS Read every comment on a task; keep only the commits none of them names.#>
+    param([string]$TaskId, $Commits, [string]$CommentTitle, $Web)
+    $comments = @(Get-ClickUpComments -TaskId $TaskId)
+    $texts = @($comments | ForEach-Object { [string](Get-Prop $_ 'comment_text' '') })
+    $new = @()
+    foreach ($commit in $Commits) {
+        $hit = $false
+        foreach ($text in $texts) {
+            if ($text.Contains($commit.Sha)) { $hit = $true; break }
+        }
+        if (-not $hit) { $new += ,$commit }
+    }
+    $body = ''
+    if ($new.Count -gt 0) {
+        $body = New-CommentBody -CommentTitle $CommentTitle -Commits $new -Web $Web
+    }
+    $total = @($Commits).Count
+    return @{ Task = $TaskId; Read = $comments.Count; Total = $total; New = $new
+              Linked = ($total - $new.Count); Body = $body }
+}
+
+
+function Get-DefaultTitle {
+    param([string[]]$Ranges)
+    return ('Commits ' + (@($Ranges) -join ', '))
+}
+
+
+function Read-LinkSpec {
+    <#.SYNOPSIS @{Repo; WebUrl; Links} from a links spec. Rejects before any read.#>
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Stop-Commits "no such spec: $Path" }
+    $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+    $parsed = $null
+    $readable = $false
+    if ($text -and $text.Trim()) {
+        try { $parsed = $text | ConvertFrom-Json; $readable = $true } catch { }
+    }
+    if (-not $readable) { Stop-Commits ("cannot read spec: {0} is not valid JSON." -f $Path) }
+
+    $options = @{ Repo = $null; WebUrl = $null }
+    # Decided from the text, not the parsed value: PowerShell 7 unrolls a
+    # one-element array into the bare object, and 5.1 wraps any array in one.
+    $isArray = $text.TrimStart([char]0xFEFF).TrimStart().StartsWith('[')
+    $isObject = (-not $isArray) -and
+                ($parsed -is [System.Management.Automation.PSCustomObject]) -and
+                ($parsed.PSObject.Properties.Name -contains 'links') -and
+                ($parsed.links -is [array])
+    if ($isObject) {
+        foreach ($pair in @(@('repo', 'Repo'), @('web_url', 'WebUrl'))) {
+            $value = $null
+            if ($parsed.PSObject.Properties.Name -contains $pair[0]) { $value = $parsed.($pair[0]) }
+            if ($null -ne $value -and -not ($value -is [string])) {
+                Stop-Commits ('spec "{0}" must be text.' -f $pair[0])
+            }
+            $options[$pair[1]] = $value
+        }
+        $entries = @($parsed.links)
+    } elseif ($isArray) {
+        $entries = @()
+        if ($null -ne $parsed) { $entries = @($parsed) }
+    } else {
+        Stop-Commits 'spec must be a JSON array of entries, or an object with a "links" array.'
+    }
+    if ($entries.Count -eq 0) { Stop-Commits 'spec has no entries.' }
+
+    $links = @()
+    # Ordinal: task ids are case-sensitive, and a hashtable's keys are not.
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $number = 0
+    foreach ($entry in $entries) {
+        $number++
+        $where = "spec entry $number"
+        if (-not ($entry -is [System.Management.Automation.PSCustomObject])) {
+            Stop-Commits "${where}: must be an object."
+        }
+        $task = Get-Prop $entry 'task'
+        if (-not ($task -is [string]) -or -not $task.Trim()) {
+            Stop-Commits ('{0}: "task" must be a task id.' -f $where)
+        }
+        # Read directly: a function returning an array unrolls it, and a
+        # one-range list would come back as a bare string.
+        $ranges = $null
+        if ($entry.PSObject.Properties.Name -contains 'ranges') { $ranges = $entry.ranges }
+        $ok = ($ranges -is [array]) -and (@($ranges).Count -gt 0)
+        if ($ok) {
+            foreach ($r in $ranges) {
+                if (-not ($r -is [string]) -or -not $r.Trim()) { $ok = $false }
+            }
+        }
+        if (-not $ok) { Stop-Commits ('{0}: "ranges" must be a non-empty list of ranges.' -f $where) }
+        $entryTitle = $null
+        if ($entry.PSObject.Properties.Name -contains 'title') { $entryTitle = $entry.title }
+        if ($null -ne $entryTitle -and -not ($entryTitle -is [string])) {
+            Stop-Commits ('{0}: "title" must be text.' -f $where)
+        }
+        if (-not $seen.Add($task)) {
+            Stop-Commits ("{0}: task {1} appears more than once." -f $where, $task)
+        }
+        $rangeList = [string[]]@($ranges)
+        if (-not $entryTitle) { $entryTitle = Get-DefaultTitle $rangeList }
+        $links += ,@{ Task = $task; Ranges = $rangeList; Title = $entryTitle; Commits = @() }
+    }
+    return @{ Repo = $options.Repo; WebUrl = $options.WebUrl; Links = $links }
+}
+
+
+function Write-Body {
+    param([string]$Body)
+    foreach ($line in ($Body -split "`n")) { Write-Host ('    ' + $line) }
+}
+
+
+function Get-RangeList {
+    <#
+    .SYNOPSIS
+        -Range as a flat list.
+    .DESCRIPTION
+        `-File` hands `-Range a..b,c..d` over as one string, where an
+        interactive session would make it an array. Splitting on commas makes
+        both spellings mean the same thing.
+    #>
+    return @(@($Range) | ForEach-Object { "$_" -split ',' } | Where-Object { $_ })
+}
+
+
+function Invoke-CommitsSingle {
+    $ranges = @(Get-RangeList)
+    if ($ranges.Count -eq 0) {
+        Write-Host 'commits needs at least one -Range, e.g. -Range v1.2.0..v1.3.0'
+        return 1
+    }
+    if ($Apply) {
+        Write-Host '-Apply is for -Spec. A single task posts unless -DryRun.'
+        return 1
+    }
+    $repoPath = '.'
+    if ($Repo) { $repoPath = $Repo }
+    $commits = @(Resolve-Commits -RepoPath $repoPath -Ranges $ranges)
+    $web = Get-WebBase -RepoPath $repoPath -Url $WebUrl
+    $commentTitle = $Title
+    if (-not $commentTitle) { $commentTitle = Get-DefaultTitle $ranges }
+    $plan = Get-LinkPlan -TaskId $Target -Commits $commits -CommentTitle $commentTitle -Web $web
+
+    Write-Host ("task {0}: {1} comment(s) read, {2} commit(s), {3} new, {4} already linked" -f
+                $plan.Task, $plan.Read, $plan.Total, $plan.New.Count, $plan.Linked)
+    if ($plan.New.Count -eq 0) {
+        Write-Host 'Nothing to do. Every commit is already linked.'
+        return 0
+    }
+    Write-Host ''
+    Write-Body $plan.Body
+
+    if ($DryRun) {
+        Write-Host "`nDry run. Drop -DryRun to write."
+        return 0
+    }
+
+    $posted = Add-ClickUpComment -TaskId $plan.Task -Text $plan.Body -NotifyAll $false
+    Write-Host ("`ncommented  {0}  {1} commit(s)  (comment {2})" -f
+                $plan.Task, $plan.New.Count, (Get-Prop $posted 'id' ''))
+    return 0
+}
+
+
+function Invoke-CommitsSpec {
+    if ($Target -or @(Get-RangeList).Count -gt 0 -or $Title) {
+        Write-Host ('-Spec takes the task, -Range and -Title from the file. ' +
+                    'Pass a task id or -Spec, not both.')
+        return 1
+    }
+    if ($DryRun) {
+        Write-Host '-Spec is a dry run unless -Apply. Drop -DryRun.'
+        return 1
+    }
+    $loaded = Read-LinkSpec -Path $Spec
+    $repoPath = '.'
+    if ($Repo) { $repoPath = $Repo } elseif ($loaded.Repo) { $repoPath = $loaded.Repo }
+    $url = $WebUrl
+    if (-not $url) { $url = $loaded.WebUrl }
+    $web = Get-WebBase -RepoPath $repoPath -Url $url
+
+    # Every range resolves before any read, and every read before any write:
+    # a bad entry anywhere stops the run with the board untouched.
+    foreach ($link in $loaded.Links) {
+        try {
+            $link.Commits = @(Resolve-Commits -RepoPath $repoPath -Ranges $link.Ranges)
+        } catch {
+            $why = Get-CommitsMessage $_
+            if ($null -eq $why) { throw }
+            Stop-Commits ("task {0}: {1}" -f $link.Task, $why)
+        }
+    }
+    $plans = @()
+    foreach ($link in $loaded.Links) {
+        $plans += ,(Get-LinkPlan -TaskId $link.Task -Commits $link.Commits `
+                                 -CommentTitle $link.Title -Web $web)
+    }
+
+    $posting = @($plans | Where-Object { $_.New.Count -gt 0 })
+    Write-Host ("spec: {0} task(s), {1} comment(s) to post, {2} task(s) already linked`n" -f
+                $plans.Count, $posting.Count, ($plans.Count - $posting.Count))
+    foreach ($plan in $plans) {
+        $mark = '='
+        if ($plan.New.Count -gt 0) { $mark = '+' }
+        Write-Host ("  {0} {1}  {2} new, {3} already linked" -f
+                    $mark, $plan.Task, $plan.New.Count, $plan.Linked)
+        foreach ($commit in $plan.New) {
+            Write-Host ("      {0} {1}" -f (Get-ShortSha $commit.Sha), $commit.Subject)
+        }
+    }
+
+    if (-not $Apply) {
+        Write-Host "`nDry run. Re-run with -Apply to write."
+        return 0
+    }
+
+    if ($posting.Count -gt 0) { Write-Host '' }
+    foreach ($plan in $posting) {
+        $posted = Add-ClickUpComment -TaskId $plan.Task -Text $plan.Body -NotifyAll $false
+        Write-Host ("commented  {0}  {1} commit(s)  (comment {2})" -f
+                    $plan.Task, $plan.New.Count, (Get-Prop $posted 'id' ''))
+    }
+    Write-Host ("`nDone. {0} posted, {1} API calls." -f $posting.Count, (Get-ClickUpCallCount))
+    return 0
+}
+
+
+function Invoke-Commits {
+    <#.SYNOPSIS Post one comment of commit links per task, skipping commits already linked.#>
+    try {
+        if ($Spec) { return (Invoke-CommitsSpec) }
+        if (-not $Target) {
+            Write-Host 'commits needs a task id, or -Spec for several tasks.'
+            return 1
+        }
+        return (Invoke-CommitsSingle)
+    } catch {
+        $why = Get-CommitsMessage $_
+        if ($null -eq $why) { throw }
+        Write-Host $why
+        return 1
+    }
+}
+
+
 function Invoke-Show {
     if (-not $List) { Write-Host 'show requires -List'; return 1 }
     foreach ($task in (Get-ClickUpTasks -ListId $List | Sort-Object name)) {
@@ -496,6 +955,7 @@ try {
         'add-list'   { exit (Invoke-AddList) }
         'show'     { exit (Invoke-Show) }
         'statuses' { exit (Invoke-Statuses) }
+        'commits'  { exit (Invoke-Commits) }
     }
 } catch {
     $message = $_.Exception.Message

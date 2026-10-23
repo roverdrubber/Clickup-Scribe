@@ -23,6 +23,9 @@ API = "https://api.clickup.com/api/v2"
 # both the CLI and specs accept the names and this maps them.
 PRIORITIES = {"urgent": 1, "high": 2, "normal": 3, "low": 4}
 
+# GET /task/{id}/comment returns at most this many per page.
+COMMENT_PAGE = 25
+
 
 def parse_priority(value) -> int | None:
     """Accept 'high', 'HIGH', or 2. Returns None for an empty value."""
@@ -219,6 +222,38 @@ class ClickUp:
     def get_task(self, task_id: str, subtasks: bool = True) -> dict:
         query = "?include_subtasks=true" if subtasks else ""
         return self._call("GET", f"/task/{task_id}{query}")
+
+    def get_comments(self, task_id: str) -> list[dict]:
+        """Every comment on a task, newest first, following pagination to the end.
+
+        The endpoint returns the newest 25 only. Older ones need `start` (the
+        oldest received comment's `date`) and `start_id` (its `id`) together.
+        Stopping at the first page silently forgets old comments, which turns
+        an "already linked" check into a duplicate post.
+        """
+        comments: list[dict] = []
+        seen: set[str] = set()
+        query = ""
+        while True:
+            payload = self._call("GET", f"/task/{task_id}/comment{query}")
+            batch = payload.get("comments") or []
+            fresh = 0
+            for comment in batch:
+                key = str(comment.get("id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                comments.append(comment)
+                fresh += 1
+            # A short page is the last one. A page with nothing new means the
+            # cursor did not move; stopping beats looping forever.
+            if len(batch) < COMMENT_PAGE or not fresh:
+                return comments
+            oldest = batch[-1]
+            query = "?" + urllib.parse.urlencode({
+                "start": str(oldest.get("date")),
+                "start_id": str(oldest.get("id")),
+            })
 
     # -- hierarchy --------------------------------------------------------
     #
@@ -437,6 +472,12 @@ class ClickUp:
         if folder_id:
             return self._call("POST", f"/folder/{folder_id}/list", body)
         return self._call("POST", f"/space/{space_id}/list", body)
+
+    def add_comment(self, task_id: str, text: str,
+                    notify_all: bool = False) -> dict:
+        """Post a plain-text comment. Returns `{id, hist_id, date}`."""
+        return self._call("POST", f"/task/{task_id}/comment",
+                          {"comment_text": text, "notify_all": bool(notify_all)})
 
     def update_task(self, task_id: str, **fields) -> dict:
         return self._call("PUT", f"/task/{task_id}", fields)
