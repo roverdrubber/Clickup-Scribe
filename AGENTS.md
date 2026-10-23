@@ -53,7 +53,7 @@ A fix in one and not the other is the defect this project is most prone to.
 **Run the parity suite before claiming a change works:**
 
 ```bash
-python3 tests/parity.py       # 47 scenarios, both runtimes, diffed
+python3 tests/parity.py       # 53 scenarios, both runtimes, diffed
 python3 tests/parity.py -v    # show both outputs on failure
 ```
 
@@ -80,3 +80,8 @@ idempotency key is the full 40-character SHA appearing anywhere in an existing
 comment on the task. Changing the comment format so that SHA no longer appears
 in full breaks dedupe against every comment already posted - each re-run would
 post them all again.
+
+**`commits --rollup` dedupes the same way, one level up:** its key is
+`CU-<subtask id>` plus that subtask's latest full SHA, both in one comment on
+the parent. Do not change the rollup line format so that either stops
+appearing - every rollup already posted would be posted again.

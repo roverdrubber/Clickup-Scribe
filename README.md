@@ -210,6 +210,7 @@ python3 $SCRIBE add-list --folder 901610445259 --name "Frontend"
 python3 $SCRIBE commits 86d44avm2 --range v1.2.0..v1.3.0 --dry-run
 python3 $SCRIBE commits 86d44avm2 --range v1.2.0..v1.3.0
 python3 $SCRIBE commits --spec links.json --apply
+python3 $SCRIBE commits --spec links.json --rollup --apply
 ```
 
 ClickUp's API has no endpoint for the Bitbucket/GitHub integration panel, so
@@ -218,6 +219,10 @@ read first and a commit whose full SHA already appears is skipped, so re-runs
 post nothing. Going forward, a `Refs: CU-<task-id>` commit footer lets the
 integration link commits on push; `commits` is for backfill. See the
 [skill](skills/clickup-scribe/SKILL.md) for the spec format.
+
+`--rollup` also posts one summary comment on each subtask's parent: a line per
+subtask with its commit count, date span, and latest SHA. Only lines the
+parent does not already carry are posted, so re-runs stay quiet.
 
 ### Read the board
 
@@ -346,7 +351,7 @@ against the same fixture and diffs stdout and exit codes, so a fix that lands
 in one and not the other fails loudly:
 
 ```bash
-python3 tests/parity.py       # 47 scenarios
+python3 tests/parity.py       # 53 scenarios
 python3 tests/parity.py -v    # show both outputs on failure
 ```
 

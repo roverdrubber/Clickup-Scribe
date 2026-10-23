@@ -189,10 +189,12 @@ scribe.py commits 86d44avm2 --range v1.2.0..v1.3.0 --dry-run   # preview
 scribe.py commits 86d44avm2 --range v1.2.0..v1.3.0             # post
 scribe.py commits --spec links.json                             # plan only
 scribe.py commits --spec links.json --apply                     # post
+scribe.py commits --spec links.json --rollup --apply            # + parent summary
 ```
 ```powershell
 .\scribe.ps1 commits 86d44avm2 -Range v1.2.0..v1.3.0 -DryRun
 .\scribe.ps1 commits -Spec links.json -Apply
+.\scribe.ps1 commits -Spec links.json -Rollup -Apply
 ```
 
 Why a comment: ClickUp's public API (v2 and v3) has no endpoint for the
@@ -232,6 +234,33 @@ A links spec is a JSON array, or an object carrying shared `repo` / `web_url`
 Every entry is validated and every range resolved before the first comment is
 read, so one bad range stops the run with the board untouched.
 
+**`--rollup` (`-Rollup`): a summary on the parent.** The commit lists stay on
+the subtasks; each parent (domain) task gets one comment summarising its
+subtasks' work. Works in single-task and spec mode. For every task in the run -
+new commits or not - the task is read (`GET /task/{id}`) for its `parent` and
+`name`; a top-level task is skipped. Each subtask's line counts all commits of
+its ranges, not only the new ones:
+
+```
+Subtask commits — through 2026-03-14
+
+Payslips (CU-86d44avm2) — 4 commits, 2026-03-02 → 2026-03-14
+latest a8a602b557b5ea7ed345a17b0d2b32bae22506df
+```
+
+Dates are author dates. Lines are ordered by last date, then name. Every
+comment on the parent is read, past the first page, and a line is already
+rolled up when one comment holds both `CU-<subtask id>` and that subtask's
+latest full SHA. One comment per parent carries only the lines that are not;
+when none are left, nothing is posted. So a subtask that gained commits gets a
+fresh line, and an unchanged sibling is not repeated. Subtask comments are
+posted first, rollups after, and every read happens before either. The dry
+run shows each parent's lines (`+` new, `=` already rolled up) and the body.
+
+A rollup comment carries full SHAs, so running plain `commits` against the
+parent itself treats those commits as already linked there. Link commits to
+leaf subtasks and let the parent take rollups.
+
 **Convention going forward.** Put the task id in a commit footer,
 `Refs: CU-<task-id>` - comma-separate several, `Refs: CU-abc, CU-def`. It
 passes `@commitlint/config-conventional` and lets the integration panel link
@@ -239,6 +268,11 @@ the commit on push. Do not rename branches to `CU-...`: that breaks
 `feature/<name>` conventions, and a branch can name only one task. Keep
 `commits` for backfill and for commits that missed the footer. Link commits to
 the leaf subtask that did the work, not to a parent or domain row.
+
+A footer may name the parent as well as the subtask,
+`Refs: CU-<subtask>, CU-<parent>`, so the parent's integration panel lists the
+commit too. `commits --rollup` is the readable summary on top of that: one
+line per subtask rather than every commit.
 
 **Read the board:**
 

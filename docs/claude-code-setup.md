@@ -166,7 +166,7 @@ Before committing a change to the skills or manifests:
 
 ```bash
 claude plugin validate .     # manifests, skills, agents, commands
-python3 tests/parity.py      # both runtimes, diffed - 47 scenarios
+python3 tests/parity.py      # both runtimes, diffed - 53 scenarios
 ```
 
 `AGENTS.md` at the repo root carries the rest of the contributor rules.

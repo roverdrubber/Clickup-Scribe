@@ -81,6 +81,17 @@ Returns `statuses[]` - the only authoritative source for which status strings
 this list accepts. Validate against it before a bulk create; an invalid status
 fails every create in the run, one wasted call at a time.
 
+### Get task
+
+```
+GET /task/{task_id}
+```
+
+Returns one task: `id`, `name`, `status`, `list`, and `parent` - the parent
+task's id, or `null` for a top-level task. `commits --rollup` reads it once
+per task per run, for the `parent` to roll up into and the `name` its line
+shows. Add `?include_subtasks=true` to get the children as `subtasks[]`.
+
 ### Task comments
 
 ```
