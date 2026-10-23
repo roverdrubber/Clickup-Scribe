@@ -52,6 +52,9 @@ def scenarios() -> list[dict]:
     links = str(FIXTURES / "links.json")
     links_invalid = str(FIXTURES / "links-invalid.json")
     links_badrange = str(FIXTURES / "links-badrange.json")
+    rollup = str(FIXTURES / "links-rollup.json")
+    rollup_next = str(FIXTURES / "links-rollup-next.json")
+    rollup_page = str(FIXTURES / "links-rollup-page.json")
     return [
         {"name": "tree", "tool": "reader",
          "steps": [(["tree"], ["tree"])]},
@@ -321,6 +324,55 @@ def scenarios() -> list[dict]:
                      "--dry-run"],
                     ["commits", "t1", "-Range", "v1..v2", "-Repo", "repo",
                      "-DryRun"])]},
+
+        # -- commits --rollup: one summary comment on the parent ----------
+
+        {"name": "rollup: dry run posts nothing", "tool": "scribe", "git": True,
+         "steps": [(["commits", "t2", "--range", "base..v1", "--repo", "repo",
+                     "--rollup", "--dry-run"],
+                    ["commits", "t2", "-Range", "base..v1", "-Repo", "repo",
+                     "-Rollup", "-DryRun"])]},
+
+        {"name": "rollup: apply, then re-run is a no-op", "tool": "scribe",
+         "git": True,
+         "steps": [
+             (["commits", "t2", "--range", "base..v1", "--repo", "repo", "--rollup"],
+              ["commits", "t2", "-Range", "base..v1", "-Repo", "repo", "-Rollup"]),
+             (["commits", "t2", "--range", "base..v1", "--repo", "repo", "--rollup"],
+              ["commits", "t2", "-Range", "base..v1", "-Repo", "repo", "-Rollup"]),
+         ]},
+
+        {"name": "rollup: a top-level task is skipped", "tool": "scribe",
+         "git": True,
+         "steps": [(["commits", "t1", "--range", "base..v1", "--repo", "repo",
+                     "--rollup"],
+                    ["commits", "t1", "-Range", "base..v1", "-Repo", "repo",
+                     "-Rollup"])]},
+
+        {"name": "rollup: two siblings in a spec share one comment", "tool": "scribe",
+         "git": True,
+         "steps": [
+             (["commits", "--spec", rollup, "--rollup"],
+              ["commits", "-Spec", rollup, "-Rollup"]),
+             (["commits", "--spec", rollup, "--rollup", "--apply"],
+              ["commits", "-Spec", rollup, "-Rollup", "-Apply"]),
+             (["commits", "--spec", rollup, "--rollup", "--apply"],
+              ["commits", "-Spec", rollup, "-Rollup", "-Apply"]),
+         ]},
+
+        {"name": "rollup: new commits add a line, the unchanged sibling does not",
+         "tool": "scribe", "git": True,
+         "steps": [
+             (["commits", "--spec", rollup, "--rollup", "--apply"],
+              ["commits", "-Spec", rollup, "-Rollup", "-Apply"]),
+             (["commits", "--spec", rollup_next, "--rollup", "--apply"],
+              ["commits", "-Spec", rollup_next, "-Rollup", "-Apply"]),
+         ]},
+
+        {"name": "rollup: a line on an old parent page counts", "tool": "scribe",
+         "git": True,
+         "steps": [(["commits", "--spec", rollup_page, "--rollup", "--apply"],
+                    ["commits", "-Spec", rollup_page, "-Rollup", "-Apply"])]},
     ]
 
 
@@ -430,6 +482,10 @@ def run(cmd: list[str], cwd: Path, extra_env: dict | None = None) -> tuple[str, 
 # messages that quote them differ by design. Canonicalise rather than compare.
 FLAG = re.compile(r"(?<![\w-])--?([A-Za-z][\w-]*)")
 
+# Each mock counts its own calls, so "N API calls." differs; the rest of the
+# line - the tally a rollup extends - is compared.
+CALLS = re.compile(r"\d+ API calls\.")
+
 # Sandbox paths differ per runtime and per run; the shape is what matters.
 SANDBOX = re.compile(r"/tmp/parity-(py|ps)-\w+")
 
@@ -450,8 +506,8 @@ def normalize(text: str) -> str:
     lines = []
     for line in text.replace("\r\n", "\n").split("\n"):
         line = line.rstrip()
-        if "API calls." in line:
-            continue
+        # The count differs; the tally around it must not.
+        line = CALLS.sub("<n> API calls.", line)
         line = FLAG.sub(lambda m: "<flag:" + m.group(1).lower().replace("-", "") + ">",
                         line)
         line = SANDBOX.sub("<sandbox>", line)

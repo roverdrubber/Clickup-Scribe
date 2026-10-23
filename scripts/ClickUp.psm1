@@ -335,11 +335,14 @@ function Invoke-ClickUp {
         Uri         = $script:Api + $Path
         Method      = $Method
         Headers     = @{ Authorization = (Get-ClickUpToken) }
-        ContentType = 'application/json'
+        ContentType = 'application/json; charset=utf-8'
         ErrorAction = 'Stop'
     }
     if ($null -ne $Body) {
-        $params['Body'] = ($Body | ConvertTo-Json -Depth 12 -Compress)
+        # Bytes, not a string: Windows PowerShell 5.1 sends a string body as
+        # ISO-8859-1, which turns any non-Latin-1 character into '?'.
+        $json = $Body | ConvertTo-Json -Depth 12 -Compress
+        $params['Body'] = [Text.Encoding]::UTF8.GetBytes($json)
     }
 
     try {

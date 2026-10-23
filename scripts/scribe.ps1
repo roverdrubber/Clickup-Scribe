@@ -29,6 +29,7 @@
 .EXAMPLE
     .\scribe.ps1 commits 86d44avm2 -Range v1.2.0..v1.3.0 -DryRun
     .\scribe.ps1 commits -Spec links.json -Apply
+    .\scribe.ps1 commits -Spec links.json -Rollup -Apply
 #>
 
 [CmdletBinding()]
@@ -67,6 +68,8 @@ param(
     [switch]$DryRun,
     [switch]$Apply,
     [switch]$Reconcile,
+    # `commits`: also post one summary comment per parent task.
+    [switch]$Rollup,
     [switch]$Yes
 )
 
@@ -563,7 +566,12 @@ function Invoke-Git {
 
 
 function Resolve-Commits {
-    <#.SYNOPSIS @{Sha; Subject} oldest first, ranges in the order given, no repeats.#>
+    <#
+    .SYNOPSIS
+        @{Sha; Subject; Date} oldest first, ranges in the order given, no repeats.
+    .DESCRIPTION
+        Date is the author date, YYYY-MM-DD, read in the same git log call.
+    #>
     param([string]$RepoPath, [string[]]$Ranges)
     $commits = New-Object System.Collections.ArrayList
     $seen = @{}
@@ -575,7 +583,8 @@ function Resolve-Commits {
         try {
             # The trailing -- stops git reading a range as a file path.
             $out = Invoke-Git -RepoPath $RepoPath -Arguments @(
-                'log', '--reverse', '--no-merges', '--format=%H%x09%s', $rangeText, '--')
+                'log', '--reverse', '--no-merges', '--date=short',
+                '--format=%H%x09%ad%x09%s', $rangeText, '--')
         } catch {
             $why = Get-CommitsMessage $_
             if ($null -eq $why) { throw }
@@ -587,15 +596,22 @@ function Resolve-Commits {
             if (-not $line) { continue }
             $tab = $line.IndexOf("`t")
             $sha = $line
+            $date = ''
             $subject = ''
             if ($tab -ge 0) {
                 $sha = $line.Substring(0, $tab)
-                $subject = $line.Substring($tab + 1)
+                $rest = $line.Substring($tab + 1)
+                $tab = $rest.IndexOf("`t")
+                $date = $rest
+                if ($tab -ge 0) {
+                    $date = $rest.Substring(0, $tab)
+                    $subject = $rest.Substring($tab + 1)
+                }
             }
             $found++
             if (-not $seen.ContainsKey($sha)) {
                 $seen[$sha] = $true
-                [void]$commits.Add(@{ Sha = $sha; Subject = $subject })
+                [void]$commits.Add(@{ Sha = $sha; Subject = $subject; Date = $date })
             }
         }
         if ($found -eq 0) { Stop-Commits ("range '{0}' contains no commits." -f $rangeText) }
@@ -805,6 +821,161 @@ function Get-RangeList {
 }
 
 
+# -- rollup: one summary comment per parent -----------------------------------
+#
+# The commit lists stay on the subtasks; the parent (domain) task gets one
+# line per subtask instead. A line is keyed on CU-<subtask id> plus the
+# subtask's latest full SHA: a parent comment holding both means that line is
+# already rolled up. Changing the line format so either stops appearing
+# breaks dedupe against every rollup already posted.
+#
+# The dash and the arrow are built from code points: Windows PowerShell 5.1
+# reads a BOM-less script in the ANSI code page, so a literal would garble.
+
+$script:Dash = [string][char]0x2014
+$script:Arrow = [string][char]0x2192
+
+
+function Get-RollupLine {
+    param($Line)
+    $noun = 'commits'
+    if ($Line.Total -eq 1) { $noun = 'commit' }
+    return ("{0} (CU-{1}) {2} {3} {4}, {5} {6} {7}`nlatest {8}" -f
+            $Line.Name, $Line.Task, $script:Dash, $Line.Total, $noun,
+            $Line.First, $script:Arrow, $Line.Last, $Line.Sha)
+}
+
+
+function New-RollupBody {
+    param($Lines)
+    $through = ''
+    foreach ($line in $Lines) {
+        if ([string]::CompareOrdinal($line.Last, $through) -gt 0) { $through = $line.Last }
+    }
+    $blocks = @(("Subtask commits {0} through {1}" -f $script:Dash, $through))
+    foreach ($line in $Lines) { $blocks += (Get-RollupLine $line) }
+    return ($blocks -join "`n`n")
+}
+
+
+function Test-RolledUp {
+    <#
+    .SYNOPSIS
+        Whether one parent comment already carries this subtask's line.
+    .DESCRIPTION
+        The id must end where CU-<id> ends, or CU-abc would count as CU-abcd.
+    #>
+    param([string]$Text, $Line)
+    if (-not $Text.Contains($Line.Sha)) { return $false }
+    $marker = [regex]::Escape('CU-' + $Line.Task) + '(?![A-Za-z0-9])'
+    return [regex]::IsMatch($Text, $marker)
+}
+
+
+function Get-RollupPlans {
+    <#
+    .SYNOPSIS
+        @{Plans (one per parent, first-seen order); Skipped (top-level ids)}.
+    .DESCRIPTION
+        Every task is read for its parent and name, and every parent's
+        comments to the end, before anything is written.
+    #>
+    param($Links)
+    # Ordinal: task ids are case-sensitive, and a hashtable's keys are not.
+    $tasks = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    $groups = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+    $order = New-Object System.Collections.ArrayList
+    $skipped = @()
+    foreach ($link in $Links) {
+        $taskId = [string]$link.Task
+        if (-not $tasks.ContainsKey($taskId)) {
+            $tasks[$taskId] = Get-ClickUpTask -TaskId $taskId -Subtasks $false
+        }
+        $task = $tasks[$taskId]
+        $parent = Get-Prop $task 'parent'
+        if (-not $parent) { $skipped += $taskId; continue }
+        $parent = [string]$parent
+        if (-not $groups.ContainsKey($parent)) {
+            $groups[$parent] = New-Object 'System.Collections.Generic.List[object]'
+            [void]$order.Add($parent)
+        }
+        $commits = @($link.Commits)
+        $latest = $commits[$commits.Count - 1]
+        $groups[$parent].Add(@{
+            Task = $taskId; Name = [string](Get-Prop $task 'name' '')
+            Total = $commits.Count; First = $commits[0].Date
+            Last = $latest.Date; Sha = $latest.Sha
+        })
+    }
+
+    $plans = @()
+    foreach ($parent in $order) {
+        $lines = $groups[$parent]
+        $lines.Sort([Comparison[object]]{
+            param($x, $y)
+            $c = [string]::CompareOrdinal($x.Last, $y.Last)
+            if ($c -eq 0) { $c = [string]::CompareOrdinal($x.Name, $y.Name) }
+            if ($c -eq 0) { $c = [string]::CompareOrdinal($x.Task, $y.Task) }
+            return $c
+        })
+        $comments = @(Get-ClickUpComments -TaskId $parent)
+        $texts = @($comments | ForEach-Object { [string](Get-Prop $_ 'comment_text' '') })
+        $new = @()
+        foreach ($line in $lines) {
+            $hit = $false
+            foreach ($text in $texts) {
+                if (Test-RolledUp -Text $text -Line $line) { $hit = $true; break }
+            }
+            if (-not $hit) { $new += ,$line }
+        }
+        $body = ''
+        if ($new.Count -gt 0) { $body = New-RollupBody $new }
+        $plans += ,@{ Parent = $parent; Read = $comments.Count; Lines = $lines.ToArray()
+                      New = $new; Body = $body }
+    }
+    return @{ Plans = $plans; Skipped = $skipped }
+}
+
+
+function Write-Rollups {
+    param($Plan)
+    foreach ($entry in $Plan.Plans) {
+        $lineCount = @($entry.Lines).Count
+        $newCount = @($entry.New).Count
+        Write-Host ("`nrollup {0}: {1} comment(s) read, {2} subtask(s), {3} new, {4} already rolled up" -f
+                    $entry.Parent, $entry.Read, $lineCount, $newCount, ($lineCount - $newCount))
+        foreach ($line in $entry.Lines) {
+            $mark = '='
+            if (@($entry.New) -contains $line) { $mark = '+' }
+            Write-Host ("  {0} {1}  {2}" -f $mark, $line.Task, $line.Name)
+        }
+        if ($newCount -gt 0) {
+            Write-Host ''
+            Write-Body $entry.Body
+        }
+    }
+    foreach ($taskId in $Plan.Skipped) {
+        Write-Host ("`nrollup skipped: {0} has no parent" -f $taskId)
+    }
+}
+
+
+function Send-Rollups {
+    <#.SYNOPSIS Post each parent's comment; Lead goes before the first line printed.#>
+    param($Plan, [string]$Lead)
+    $count = 0
+    foreach ($entry in $Plan.Plans) {
+        if (@($entry.New).Count -eq 0) { continue }
+        $posted = Add-ClickUpComment -TaskId $entry.Parent -Text $entry.Body -NotifyAll $false
+        Write-Host ("{0}rolled up  {1}  {2} subtask(s)  (comment {3})" -f
+                    $Lead, $entry.Parent, @($entry.New).Count, (Get-Prop $posted 'id' ''))
+        $Lead = ''
+        $count++
+    }
+    return $count
+}
+
+
 function Invoke-CommitsSingle {
     $ranges = @(Get-RangeList)
     if ($ranges.Count -eq 0) {
@@ -822,24 +993,45 @@ function Invoke-CommitsSingle {
     $commentTitle = $Title
     if (-not $commentTitle) { $commentTitle = Get-DefaultTitle $ranges }
     $plan = Get-LinkPlan -TaskId $Target -Commits $commits -CommentTitle $commentTitle -Web $web
+    $rollups = @{ Plans = @(); Skipped = @() }
+    if ($Rollup) {
+        $rollups = Get-RollupPlans -Links @(,@{ Task = $Target; Commits = $commits })
+    }
 
     Write-Host ("task {0}: {1} comment(s) read, {2} commit(s), {3} new, {4} already linked" -f
                 $plan.Task, $plan.Read, $plan.Total, $plan.New.Count, $plan.Linked)
-    if ($plan.New.Count -eq 0) {
+    if ($plan.New.Count -eq 0 -and -not $Rollup) {
         Write-Host 'Nothing to do. Every commit is already linked.'
         return 0
     }
-    Write-Host ''
-    Write-Body $plan.Body
+    if ($plan.New.Count -gt 0) {
+        Write-Host ''
+        Write-Body $plan.Body
+    } else {
+        Write-Host 'Every commit is already linked.'
+    }
+    if ($Rollup) {
+        Write-Rollups -Plan $rollups
+        $pending = @($rollups.Plans | Where-Object { @($_.New).Count -gt 0 })
+        if ($plan.New.Count -eq 0 -and $pending.Count -eq 0) {
+            Write-Host "`nNothing to do. Every commit is already linked and rolled up."
+            return 0
+        }
+    }
 
     if ($DryRun) {
         Write-Host "`nDry run. Drop -DryRun to write."
         return 0
     }
 
-    $posted = Add-ClickUpComment -TaskId $plan.Task -Text $plan.Body -NotifyAll $false
-    Write-Host ("`ncommented  {0}  {1} commit(s)  (comment {2})" -f
-                $plan.Task, $plan.New.Count, (Get-Prop $posted 'id' ''))
+    $lead = "`n"
+    if ($plan.New.Count -gt 0) {
+        $posted = Add-ClickUpComment -TaskId $plan.Task -Text $plan.Body -NotifyAll $false
+        Write-Host ("`ncommented  {0}  {1} commit(s)  (comment {2})" -f
+                    $plan.Task, $plan.New.Count, (Get-Prop $posted 'id' ''))
+        $lead = ''
+    }
+    [void](Send-Rollups -Plan $rollups -Lead $lead)
     return 0
 }
 
@@ -877,10 +1069,15 @@ function Invoke-CommitsSpec {
         $plans += ,(Get-LinkPlan -TaskId $link.Task -Commits $link.Commits `
                                  -CommentTitle $link.Title -Web $web)
     }
+    $rollups = @{ Plans = @(); Skipped = @() }
+    if ($Rollup) { $rollups = Get-RollupPlans -Links $loaded.Links }
+    $rolling = @($rollups.Plans | Where-Object { @($_.New).Count -gt 0 })
 
     $posting = @($plans | Where-Object { $_.New.Count -gt 0 })
-    Write-Host ("spec: {0} task(s), {1} comment(s) to post, {2} task(s) already linked`n" -f
-                $plans.Count, $posting.Count, ($plans.Count - $posting.Count))
+    $tally = ("spec: {0} task(s), {1} comment(s) to post, {2} task(s) already linked" -f
+              $plans.Count, $posting.Count, ($plans.Count - $posting.Count))
+    if ($Rollup) { $tally += (", {0} rollup comment(s) to post" -f $rolling.Count) }
+    Write-Host ($tally + "`n")
     foreach ($plan in $plans) {
         $mark = '='
         if ($plan.New.Count -gt 0) { $mark = '+' }
@@ -890,19 +1087,26 @@ function Invoke-CommitsSpec {
             Write-Host ("      {0} {1}" -f (Get-ShortSha $commit.Sha), $commit.Subject)
         }
     }
+    if ($Rollup) { Write-Rollups -Plan $rollups }
 
     if (-not $Apply) {
         Write-Host "`nDry run. Re-run with -Apply to write."
         return 0
     }
 
-    if ($posting.Count -gt 0) { Write-Host '' }
+    if ($posting.Count -gt 0 -or $rolling.Count -gt 0) { Write-Host '' }
     foreach ($plan in $posting) {
         $posted = Add-ClickUpComment -TaskId $plan.Task -Text $plan.Body -NotifyAll $false
         Write-Host ("commented  {0}  {1} commit(s)  (comment {2})" -f
                     $plan.Task, $plan.New.Count, (Get-Prop $posted 'id' ''))
     }
-    Write-Host ("`nDone. {0} posted, {1} API calls." -f $posting.Count, (Get-ClickUpCallCount))
+    if (-not $Rollup) {
+        Write-Host ("`nDone. {0} posted, {1} API calls." -f $posting.Count, (Get-ClickUpCallCount))
+        return 0
+    }
+    $rolled = Send-Rollups -Plan $rollups -Lead ''
+    Write-Host ("`nDone. {0} posted, {1} rollup comment(s) posted, {2} API calls." -f
+                $posting.Count, $rolled, (Get-ClickUpCallCount))
     return 0
 }
 
