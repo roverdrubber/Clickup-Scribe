@@ -1,6 +1,6 @@
 {
   "name": "clickup-scribe",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read and write ClickUp boards over REST without spending the MCP server's daily quota. Write one task or a whole tree from a declarative JSON spec; read spaces, folders, lists, tasks and subtasks, and export a board back into a spec. Idempotent, dry-run first, Python and PowerShell implementations so it runs with nothing installed on Linux, macOS, or Windows.",
   "author": {
     "name": "John Gabriel Bagacina"
